@@ -3,23 +3,67 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using SharpDX;
 using SharpDX.Toolkit.Graphics;
 
 namespace Shade {
    public class Camera {
+      private readonly GraphicsConfiguration graphicsConfiguration;
+      private readonly MouseEventBus mouseEventBus;
       private readonly Character character;
       private float pitch = -MathUtil.PiOverFour;
       private float yaw = 0;
       private float desiredRadius = 60 * (float)Math.Sqrt(2);
       private float currentRadius = 60 * (float)Math.Sqrt(2);
+      private bool isDragRotating = false;
+      private int lastMouseX;
+      private int lastMouseY;
 
-      public Camera(Character character) {
+      public Camera(GraphicsConfiguration graphicsConfiguration, MouseEventBus mouseEventBus, Character character) {
+         this.graphicsConfiguration = graphicsConfiguration;
+         this.mouseEventBus = mouseEventBus;
          this.character = character;
       }
 
       public Matrix View { get; private set; }
       public Matrix Projection { get; private set; }
+      public ViewportF Viewport { get; private set; }
+
+      public void Initialize() {
+         mouseEventBus.Event += HandleMouseEvent;
+
+         Viewport = new ViewportF(0, 0, graphicsConfiguration.Width, graphicsConfiguration.Height);
+      }
+
+      private void HandleMouseEvent(object sender, MouseEventInfo e) {
+         switch (e.Type) {
+            case MouseEventType.Wheel:
+               Zoom(e.Delta);
+               break;
+            case MouseEventType.Down:
+               if (e.Button.HasFlag(MouseButtons.Middle)) {
+                  isDragRotating = true;
+                  lastMouseX = e.X;
+                  lastMouseY = e.Y;
+               }
+               break;
+            case MouseEventType.Move:
+               if (isDragRotating) {
+                  var dx = e.X - lastMouseX;
+                  var dy = e.Y - lastMouseY;
+                  Drag(dx, dy);
+                  lastMouseX = e.X;
+                  lastMouseY = e.Y;
+               }
+               break;
+            case MouseEventType.Up:
+               if (e.Button.HasFlag(MouseButtons.Middle)) {
+                  isDragRotating = false;
+               }
+               break;
+         }
+      }
 
       public void UpdatePrerender(GraphicsDevice graphicsDevice) {
          var r = new Vector4(0, -currentRadius, 0, 1.0f);
@@ -44,6 +88,10 @@ namespace Shade {
       public void Zoom(int delta) {
          desiredRadius -= delta * 0.02f;
          desiredRadius = Math.Min(100, Math.Max(10, desiredRadius));
+      }
+
+      public Ray GetPickRay(int cursorX, int cursorY) {
+         return Ray.GetPickRay(cursorX, cursorY, Viewport, View * Projection);
       }
    }
 }

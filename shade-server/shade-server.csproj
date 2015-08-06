@@ -79,6 +79,8 @@
   <ItemGroup>
     <Compile Include="Camera.cs" />
     <Compile Include="Character.cs" />
+    <Compile Include="EventBus.cs" />
+    <Compile Include="GraphicsConfiguration.cs" />
     <Compile Include="NavigationGrid.cs" />
     <Compile Include="NavigationMesh.cs" />
     <Compile Include="Pathfinder.cs" />

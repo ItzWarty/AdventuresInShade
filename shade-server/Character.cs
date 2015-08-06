@@ -4,19 +4,23 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using ItzWarty;
 using SharpDX;
 using SharpDX.Toolkit;
 
 namespace Shade {
    public class Character {
+      private readonly MouseEventBus mouseEventBus;
       private readonly NavigationGrid grid;
       private readonly Pathfinder pathfinder;
+      private Camera camera;
       private Vector3 position;
       internal Pathfinder.Pathlet path;
       internal int pathProgress = 0;
 
-      public Character(NavigationGrid grid, Pathfinder pathfinder) {
+      public Character(MouseEventBus mouseEventBus, NavigationGrid grid, Pathfinder pathfinder) {
+         this.mouseEventBus = mouseEventBus;
          this.grid = grid;
          this.pathfinder = pathfinder;
       }
@@ -25,6 +29,20 @@ namespace Shade {
       public float Y { get { return position.Y; } set { position.Y = value; } }
       public float Z { get { return position.Z; } set { position.Z = value; } }
       public Vector3 Position { get { return position; } set { position = value; } }
+
+      public void SetCamera(Camera camera) {
+         this.camera = camera;
+      }
+
+      public void Initialize() {
+         mouseEventBus.Event += HandleMouseEvent;
+      }
+
+      private void HandleMouseEvent(object sender, MouseEventInfo e) {
+         if (e.Button.HasFlag(MouseButtons.Right)) {
+            HandlePathingClick(camera.GetPickRay(e.X, e.Y));
+         }
+      }
 
       public void Step(GameTime gameTime) {
          if (path != null) {
@@ -64,13 +82,17 @@ namespace Shade {
       }
 
       public void HandlePathingClick(Ray pickRay) {
-         var currentGridlet = GetCurrentCellPair().Key;
-         NavigationGridlet destinationGridlet;
-         int destinationCellIndex;
-         Vector3 intersection;
-         if (TryIntersect(pickRay, out destinationGridlet, out destinationCellIndex, out intersection)) {
-            path = pathfinder.FindPath(position, intersection);
-            pathProgress = 1;
+         try {
+            var currentGridlet = GetCurrentCellPair().Key;
+            NavigationGridlet destinationGridlet;
+            int destinationCellIndex;
+            Vector3 intersection;
+            if (TryIntersect(pickRay, out destinationGridlet, out destinationCellIndex, out intersection)) {
+               path = pathfinder.FindPath(position, intersection);
+               pathProgress = 1;
+            }
+         } catch (Exception e) {
+
          }
          //         var destinationGridlet = grid.GetGridlets(pickRay);
 

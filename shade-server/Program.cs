@@ -16,6 +16,7 @@ namespace Shade {
       private static void Main(string[] args) {
          Application.EnableVisualStyles();
 
+         var graphicsConfiguration = new GraphicsConfiguration { Width = 1600, Height = 900 };
          var gridletFactory = new GridletFactory();
          IReadOnlyList<NavigationGridlet> gridlets = new List<NavigationGridlet> {
             gridletFactory.Quad(0, 0, 0, 0, 0, 0, 60, 60),
@@ -26,10 +27,14 @@ namespace Shade {
          var grid = new NavigationGrid(gridlets);
          grid.Initialize();
          var pathfinder = new Pathfinder(grid);
-         var character = new Character(grid, pathfinder);
+         var mouseEventBus = new MouseEventBus();
+         var character = new Character(mouseEventBus, grid, pathfinder);
+         character.Initialize();
          character.Position = new Vector3(45, 0, 10);
-         var camera = new Camera(character);
-         using (var game = new ShadeGame(grid, character, camera, pathfinder)) {
+         var camera = new Camera(graphicsConfiguration, mouseEventBus, character);
+         camera.Initialize();
+         character.SetCamera(camera);
+         using (var game = new ShadeGame(graphicsConfiguration, grid, character, camera, pathfinder, mouseEventBus)) {
             game.Run();
          }
       }
@@ -60,10 +65,12 @@ namespace Shade {
    }
 
    public class ShadeGame : Game {
+      private readonly GraphicsConfiguration graphicsConfiguration;
       private readonly NavigationGrid navigationGrid;
       private readonly Character character;
       private readonly Camera camera;
       private readonly Pathfinder pathfinder;
+      private readonly MouseEventBus mouseEventBus;
       private readonly GraphicsDeviceManager graphicsDeviceManager;
       private RenderMesh cubeMesh;
       private GeometricPrimitive cube;
@@ -73,15 +80,17 @@ namespace Shade {
       private PrimitiveBatch<VertexPositionColor> debugBatch;
       private Effect debugEffect;
 
-      public ShadeGame(NavigationGrid navigationGrid, Character character, Camera camera, Pathfinder pathfinder) {
+      public ShadeGame(GraphicsConfiguration graphicsConfiguration, NavigationGrid navigationGrid, Character character, Camera camera, Pathfinder pathfinder, MouseEventBus mouseEventBus) {
+         this.graphicsConfiguration = graphicsConfiguration;
          this.navigationGrid = navigationGrid;
          this.character = character;
          this.camera = camera;
          this.pathfinder = pathfinder;
+         this.mouseEventBus = mouseEventBus;
 
          this.graphicsDeviceManager = new GraphicsDeviceManager(this);
-         this.graphicsDeviceManager.PreferredBackBufferWidth = 1600;
-         this.graphicsDeviceManager.PreferredBackBufferHeight = 900;
+         this.graphicsDeviceManager.PreferredBackBufferWidth = graphicsConfiguration.Width;
+         this.graphicsDeviceManager.PreferredBackBufferHeight = graphicsConfiguration.Height;
          this.graphicsDeviceManager.DeviceCreationFlags |= DeviceCreationFlags.Debug;
 
          Content.RootDirectory = "Content";
@@ -94,6 +103,9 @@ namespace Shade {
       /// </summary>
       protected override void Initialize() {
          base.Initialize();
+
+         IsFixedTimeStep = true;
+         IsMouseVisible = true;
 
          cube = ToDisposeContent(GeometricPrimitive.Cube.New(GraphicsDevice));
          var cubeBounds = new OrientedBoundingBox(new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, 0.5f, 0.5f));
@@ -112,46 +124,20 @@ namespace Shade {
          basicEffect.EnableDefaultLighting(); // enable default lightning, useful for quick prototyping
 
          var debugEffectCompilerResult = new EffectCompiler().CompileFromFile("shaders/debug_solid.hlsl", EffectCompilerFlags.Debug);
-         Console.WriteLine("SUCCESS? " + !debugEffectCompilerResult.HasErrors);
-         foreach (var message in debugEffectCompilerResult.Logger.Messages) {
-            Console.WriteLine(message.Text);
-         }
-         foreach (var shader in debugEffectCompilerResult.EffectData.Shaders) {
-            Console.WriteLine("HAVE SHADER " + shader.Name);
-         }
          debugEffect = new Effect(GraphicsDevice, debugEffectCompilerResult.EffectData, GraphicsDevice.DefaultEffectPool);
-         foreach (var x in debugEffect.Parameters) {
-            Console.WriteLine("PARAMETER " + x.Name);
-         }
-
-
          debugBatch = new PrimitiveBatch<VertexPositionColor>(GraphicsDevice);
 
-         // Mouse Stuff:
-         this.IsMouseVisible = true;
-
-         int lastMouseX = -1, lastMouseY = -1;
          Form.MouseUp += (s, e) => {
-            lastMouseX = -1;
-            lastMouseY = -1;
+            mouseEventBus.Trigger(MouseEventType.Up, e);
          };
          Form.MouseMove += (s, e) => {
-            if (e.Button.HasFlag(MouseButtons.Right)) {
-               if (lastMouseX != -1) {
-                  var dx = e.X - lastMouseX;
-                  var dy = e.Y - lastMouseY;
-                  camera.Drag(dx, dy);
-               }
-               lastMouseX = e.X;
-               lastMouseY = e.Y;
-            }
+            mouseEventBus.Trigger(MouseEventType.Move, e);
          };
          Form.MouseWheel += (s, e) => {
-            camera.Zoom(e.Delta);
+            mouseEventBus.Trigger(MouseEventType.Wheel, e);
          };
          Form.MouseDown += (s, e) => {
-            Console.WriteLine(e.Location);
-            character.HandlePathingClick(GetPickRay(e.Location));
+            mouseEventBus.Trigger(MouseEventType.Down, e);
          };
       }
 
@@ -162,6 +148,7 @@ namespace Shade {
 
       protected override void Draw(GameTime gameTime) {
          base.Draw(gameTime);
+         GraphicsDevice.Viewport = camera.Viewport;
          GraphicsDevice.Clear(Color4.Black);
          GraphicsDevice.SetDepthStencilState(GraphicsDevice.DepthStencilStates.Default);
 
@@ -170,32 +157,32 @@ namespace Shade {
          basicEffect.Projection = camera.Projection;
          foreach (var gridlet in navigationGrid.Gridlets) {
             GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.Default);
-            for (var y = 0; y < gridlet.YLength; y++) {
-               for (var x = 0; x < gridlet.XLength; x++) {
-                  var cellIndex = y * gridlet.XLength + x;
-                  var cellHeight = gridlet.Cells[cellIndex].Height;
-                  var cellFlags = gridlet.Cells[cellIndex].Flags;
-                  var transform = gridlet.Cells[cellIndex].OrientedBoundingBox.Transformation;
-                  basicEffect.World = cubeModelTransform * transform;
-                  if (cellFlags.HasFlag(CellFlags.Connector)) {
-                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-                     basicEffect.DiffuseColor = new Vector4(color, color / 2, 0, 1.0f);
-                  } else if (cellFlags.HasFlag(CellFlags.Debug)) {
-                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-                     basicEffect.DiffuseColor = new Vector4(0.0f, 0, color, 1.0f);
-                  } else if (cellFlags.HasFlag(CellFlags.Blocked)) {
-                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-                     basicEffect.DiffuseColor = new Vector4(color, 0.0f, 0, 1.0f);
-                  } else if (cellFlags.HasFlag(CellFlags.Edge)) {
-                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-                     basicEffect.DiffuseColor = new Vector4(0.0f, color, 0, 1.0f);
-                  } else {
-                     var color = ((x + y) % 2 == 0) ? 0.2f : 0.4f;
-                     basicEffect.DiffuseColor = new Vector4(color, color, color, 1.0f);
-                  }
-                  cube.Draw(GraphicsDevice, basicEffect);
-               }
-            }
+//            for (var y = 0; y < gridlet.YLength; y++) {
+//               for (var x = 0; x < gridlet.XLength; x++) {
+//                  var cellIndex = y * gridlet.XLength + x;
+//                  var cellHeight = gridlet.Cells[cellIndex].Height;
+//                  var cellFlags = gridlet.Cells[cellIndex].Flags;
+//                  var transform = gridlet.Cells[cellIndex].OrientedBoundingBox.Transformation;
+//                  basicEffect.World = cubeModelTransform * transform;
+//                  if (cellFlags.HasFlag(CellFlags.Connector)) {
+//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
+//                     basicEffect.DiffuseColor = new Vector4(color, color / 2, 0, 1.0f);
+//                  } else if (cellFlags.HasFlag(CellFlags.Debug)) {
+//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
+//                     basicEffect.DiffuseColor = new Vector4(0.0f, 0, color, 1.0f);
+//                  } else if (cellFlags.HasFlag(CellFlags.Blocked)) {
+//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
+//                     basicEffect.DiffuseColor = new Vector4(color, 0.0f, 0, 1.0f);
+//                  } else if (cellFlags.HasFlag(CellFlags.Edge)) {
+//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
+//                     basicEffect.DiffuseColor = new Vector4(0.0f, color, 0, 1.0f);
+//                  } else {
+//                     var color = ((x + y) % 2 == 0) ? 0.2f : 0.4f;
+//                     basicEffect.DiffuseColor = new Vector4(color, color, color, 1.0f);
+//                  }
+//                  cube.Draw(GraphicsDevice, basicEffect);
+//               }
+//            }
          }
 
          // Draw character
@@ -210,13 +197,13 @@ namespace Shade {
          cube.Draw(basicEffect);
 
          // Draw Character's Gridlet OBB
-//         foreach (var gridlet in navigationGrid.GetGridlets(character.X, character.Y)) {
-//            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
-//            var bb = gridlet.OrientedBoundingBox;
-//            basicEffect.DiffuseColor = new Vector4(1.0f, 0, 0, 1.0f);
-//            basicEffect.World = bb.Transformation * Matrix.Scaling(1.01f);
-//            cube.Draw(basicEffect);
-//         }
+         foreach (var gridlet in navigationGrid.GetGridlets(character.X, character.Y)) {
+            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
+            var bb = gridlet.OrientedBoundingBox;
+            basicEffect.DiffuseColor = new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+            basicEffect.World = bb.Transformation * Matrix.Scaling(1.01f);
+            cube.Draw(basicEffect);
+         }
 
          foreach (var gridlet in navigationGrid.Gridlets) {
             GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
@@ -273,8 +260,8 @@ namespace Shade {
             debugBatch.Begin();
             for (var i = 0; i < pathPoints.Length - 1; i++) {
                debugBatch.DrawLine(
-                  new VertexPositionColor(pathPoints[i], Color.Lime),
-                  new VertexPositionColor(pathPoints[i + 1], Color.Lime)
+                  new VertexPositionColor(pathPoints[i], Color.Cyan),
+                  new VertexPositionColor(pathPoints[i + 1], Color.Cyan)
                   );
             }
             debugBatch.End();
@@ -303,10 +290,6 @@ namespace Shade {
 //            debugBatch.End();
 //            zzzz++;
          }
-      }
-
-      private Ray GetPickRay(Point cursor) {
-         return Ray.GetPickRay(cursor.X, cursor.Y, GraphicsDevice.Viewport, camera.View * camera.Projection);
       }
    }
 }
