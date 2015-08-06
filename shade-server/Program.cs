@@ -18,17 +18,16 @@ namespace Shade {
 
          var gridletFactory = new GridletFactory();
          IReadOnlyList<NavigationGridlet> gridlets = new List<NavigationGridlet> {
-//            gridletFactory.Quad(3, 0, 0, -0.3f, 0, 0, 15, 7),
             gridletFactory.Quad(0, 0, 0, 0, 0, 0, 60, 60),
             gridletFactory.Quad(37, 0, 2, -0.3f, 0, 0, 15, 7),
-            gridletFactory.Quad(47.5f, -4.0f, 4.25f, 0, 0, 0, 7, 15),
-            gridletFactory.Quad(58, -8.0f, 4.25f, 0, 0, 0, 15, 7)
+            gridletFactory.Quad(47.60f, -9.0f, 4.22f, 0, 0, 0, 7, 25),
+            gridletFactory.Quad(58.05f, -18.0f, 4.22f, 0, 0, 0, 15, 7)
          };
          var grid = new NavigationGrid(gridlets);
          grid.Initialize();
          var pathfinder = new Pathfinder(grid);
          var character = new Character(grid, pathfinder);
-         character.X = 0;
+         character.Position = new Vector3(45, 0, 10);
          var camera = new Camera(character);
          using (var game = new ShadeGame(grid, character, camera, pathfinder)) {
             game.Run();
@@ -268,7 +267,7 @@ namespace Shade {
          debugBatch.End();
 
          // Draw pathing
-         var path = pathfinder.FindPath(new Vector3(0, 0, 0), new Vector3(58, -8, 4.25f));
+         var path = character.path;
          if (path != null) {
             var pathPoints = path.Points.ToArray();
             debugBatch.Begin();

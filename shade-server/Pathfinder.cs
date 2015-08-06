@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using ItzWarty;
@@ -14,15 +16,16 @@ namespace Shade {
          this.grid = grid;
       }
 
-      public Path FindPath(Vector3 start, Vector3 end) {
+      public Pathlet FindPath(Vector3 start, Vector3 end) {
          var startRay = new Ray(start + Vector3.UnitZ, -Vector3.UnitZ);
          var endRay = new Ray(end + Vector3.UnitZ, -Vector3.UnitZ);
          var startGridlet = grid.GetGridlets(startRay).FirstOrDefault();
          var endGridlet = grid.GetGridlets(endRay).FirstOrDefault();
+
          if (startGridlet == null || endGridlet == null) {
             return null;
          } else if (startGridlet == endGridlet) {
-            return new Path(LocalPathlet(startGridlet, start, end));
+            return LocalPathlet(startGridlet, start, end);
          } else {
             var gridletPath = FindGridletPath(startGridlet, endGridlet);
 
@@ -35,7 +38,7 @@ namespace Shade {
             var connectorPaths = Util.Generate(
                startConnectors.Length, 
                i => startConnectors[i].PairValue(
-                  new Path(LocalPathlet(startGridlet, start, startConnectors[i].OrientedBoundingBox.Center))
+                  LocalPathlet(startGridlet, start, startConnectors[i].OrientedBoundingBox.Center)
                ));
 
             // Run down gridlets, finding shortest path to next connectors
@@ -47,7 +50,7 @@ namespace Shade {
                                  select (from kvp in connectorPaths
                                         let bc = kvp.Key
                                         let bp = kvp.Value
-                                        select new Path(
+                                        select Pathlet.Combine(
                                            bp, 
                                            LocalPathlet(gridlet, bc.OrientedBoundingBox.Center, ac.OrientedBoundingBox.Center)
                                         )).MinBy(x => x.Length).PairKey(ac)).ToArray();
@@ -56,7 +59,7 @@ namespace Shade {
 
             // Find paths to pathing end location.
             return (from cp in connectorPaths
-                    select new Path(cp.Value, LocalPathlet(endGridlet, cp.Key.OrientedBoundingBox.Center, end))).MinBy(x => x.Length);
+                    select Pathlet.Combine(cp.Value, LocalPathlet(endGridlet, cp.Key.OrientedBoundingBox.Center, end))).MinBy(x => x.Length);
          }
       }
 
@@ -81,39 +84,7 @@ namespace Shade {
          return new Pathlet(new[] { start, end });
       }
 
-      public class Path {
-         private readonly Path path;
-         private readonly Pathlet pathlet;
-
-         public Path(Pathlet pathlet) {
-            this.pathlet = pathlet;
-         }
-
-         public Path(Path path, Pathlet pathlet) {
-            this.path = path;
-            this.pathlet = pathlet;
-         }
-
-         public float Length => (path?.Length ?? 0) + pathlet.Length;
-
-         public IEnumerable<Vector3> Points => EnumeratePoints();
-
-         private IEnumerable<Vector3> EnumeratePoints() {
-            if (path == null) {
-               yield return pathlet.Points[0];
-            } else {
-               foreach (var x in path.EnumeratePoints()) {
-                  yield return x;
-               }
-            }
-            for (var i = 1; i < pathlet.Points.Length; i++) {
-               yield return pathlet.Points[i];
-            }
-         }
-      }
-
       public class Pathlet {
-
          public Pathlet(Vector3[] points) {
             Points = points;
             for (var i = 0; i < points.Length - 1; i++) {
@@ -123,6 +94,17 @@ namespace Shade {
 
          public Vector3[] Points { get; set; }
          public float Length { get; set; }
+
+         public static Pathlet Combine(Pathlet a, Pathlet b) {
+            Vector3[] points = new Vector3[a.Points.Length + b.Points.Length - 1];
+            for (var i = 0; i < a.Points.Length; i++) {
+               points[i] = a.Points[i];
+            }
+            for (var i = 1; i < b.Points.Length; i++) {
+               points[a.Points.Length + i - 1] = b.Points[i];
+            }
+            return new Pathlet(points);
+         }
       }
 
       public NavigationGridlet[] FindGridletPath(NavigationGridlet start, NavigationGridlet end) {

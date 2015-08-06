@@ -13,6 +13,8 @@ namespace Shade {
       private readonly NavigationGrid grid;
       private readonly Pathfinder pathfinder;
       private Vector3 position;
+      internal Pathfinder.Pathlet path;
+      internal int pathProgress = 0;
 
       public Character(NavigationGrid grid, Pathfinder pathfinder) {
          this.grid = grid;
@@ -21,12 +23,44 @@ namespace Shade {
 
       public float X { get { return position.X; } set { position.X = value; } }
       public float Y { get { return position.Y; } set { position.Y = value; } }
-      public float Z => Position.Z;
-      public Vector3 Position => position;
+      public float Z { get { return position.Z; } set { position.Z = value; } }
+      public Vector3 Position { get { return position; } set { position = value; } }
 
       public void Step(GameTime gameTime) {
-         var highestCell = GetCurrentCellPair();
-         position.Z = highestCell.Value.Height;
+         if (path != null) {
+            var ms = 10;
+            var d = ms * (float)gameTime.ElapsedGameTime.TotalSeconds;
+            Console.WriteLine(path.Points.Join(", "));
+            Console.WriteLine(d);
+            while (d > 0 && pathProgress < path.Points.Length) {
+               var nextPoint = path.Points[pathProgress];
+               var dR = Vector3.Distance(Position, nextPoint);
+               Console.WriteLine("DR: " + dR);
+               if (dR > d) {
+                  var dir = (nextPoint - position);
+                  dir.Normalize();
+                  Console.WriteLine(dir);
+                  position += dir * d;
+                  d = 0;
+               } else {
+                  d -= dR;
+                  Position = nextPoint;
+                  pathProgress++;
+               }
+            }
+            if (pathProgress == path.Points.Length) {
+               pathProgress = -1;
+               path = null;
+            }
+         }
+         try {
+            if (path == null) {
+               var highestCell = GetCurrentCellPair();
+               position.Z = highestCell.Value.OrientedBoundingBox.Center.Z + 0.5f;
+            }
+         } catch (Exception e) {
+            Console.WriteLine(e);
+         }
       }
 
       public void HandlePathingClick(Ray pickRay) {
@@ -35,8 +69,8 @@ namespace Shade {
          int destinationCellIndex;
          Vector3 intersection;
          if (TryIntersect(pickRay, out destinationGridlet, out destinationCellIndex, out intersection)) {
-            pathfinder.FindPath(position, intersection);
-//            path.ForEach(x => Console.WriteLine(x.OrientedBoundingBox.Center));
+            path = pathfinder.FindPath(position, intersection);
+            pathProgress = 1;
          }
          //         var destinationGridlet = grid.GetGridlets(pickRay);
 
