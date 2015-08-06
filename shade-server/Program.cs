@@ -20,13 +20,14 @@ namespace Shade {
          IReadOnlyList<NavigationGridlet> gridlets = new List<NavigationGridlet> {
             gridletFactory.Quad(0, 0, 0, 60, 60),
             gridletFactory.Quad(37, 0, 0, 15, 7),
-            gridletFactory.Quad(41, -10.5f, 0, 7, 15)
+            gridletFactory.Quad(41, -10.5f, 0, 7, 15),
+            gridletFactory.Quad(52, -10.5f, 0, 15, 7)
          };
          var grid = new NavigationGrid(gridlets);
          grid.Initialize();
          var pathfinder = new Pathfinder(grid);
          var character = new Character(grid, pathfinder);
-         character.X = 34;
+         character.X = 0;
          var camera = new Camera(character);
          using (var game = new ShadeGame(grid, character, camera, pathfinder)) {
             game.Run();
@@ -134,7 +135,7 @@ namespace Shade {
             lastMouseY = -1;
          };
          Form.MouseMove += (s, e) => {
-            if (e.Button.HasFlag(MouseButtons.Middle)) {
+            if (e.Button.HasFlag(MouseButtons.Right)) {
                if (lastMouseX != -1) {
                   var dx = e.X - lastMouseX;
                   var dy = e.Y - lastMouseY;
@@ -257,15 +258,14 @@ namespace Shade {
          debugBatch.End();
 
          // Draw pathing
-         var path = pathfinder.FindPaths(new Vector3(0, 0, 0), new Vector3(36, 0, 0));
+         var path = pathfinder.FindPath(new Vector3(0, 0, 0), new Vector3(57, -8, 0));
+         var pathPoints = path.Points.ToArray();
          debugBatch.Begin();
-         foreach (var pathlet in path.Pathlets) {
-            for (var i = 0; i < pathlet.Points.Length - 1; i++) {
-               debugBatch.DrawLine(
-                  new VertexPositionColor(pathlet.Points[i], Color.Lime),
-                  new VertexPositionColor(pathlet.Points[i + 1], Color.Lime)
-               );
-            }
+         for (var i = 0; i < pathPoints.Length - 1; i++) {
+            debugBatch.DrawLine(
+               new VertexPositionColor(pathPoints[i], Color.Lime),
+               new VertexPositionColor(pathPoints[i + 1], Color.Lime)
+            );
          }
          debugBatch.End();
 

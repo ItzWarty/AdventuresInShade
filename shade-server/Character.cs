@@ -35,7 +35,7 @@ namespace Shade {
          int destinationCellIndex;
          Vector3 intersection;
          if (TryIntersect(pickRay, out destinationGridlet, out destinationCellIndex, out intersection)) {
-            pathfinder.FindPaths(position, intersection);
+            pathfinder.FindPath(position, intersection);
 //            path.ForEach(x => Console.WriteLine(x.OrientedBoundingBox.Center));
          }
          //         var destinationGridlet = grid.GetGridlets(pickRay);
