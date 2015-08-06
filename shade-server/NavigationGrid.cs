@@ -89,9 +89,10 @@ namespace Shade {
    public class NavigationGridlet {
       public float X { get; set; }
       public float Y { get; set; }
+      public float Z { get; set; }
       public int XLength { get; set; }
       public int YLength { get; set; }
-      public float Orientation { get; set; }
+      public Matrix Orientation { get; set; }
       public OrientedBoundingBox OrientedBoundingBox { get; set; }
 
       public NavigationGridletCell[] Cells { get; set; }
@@ -101,11 +102,10 @@ namespace Shade {
 
       public void Initialize() {
          var obb = new OrientedBoundingBox(-Vector3.One / 2, Vector3.One / 2);
-         obb.Transform(Matrix.Translation(new Vector3(0, 0, 0.5f)));
-         var gridletHeight = Cells.Max(c => c.Height) + 1;
+         var gridletHeight = Cells.Max(c => c.Height);
          obb.Scale(new Vector3(XLength, YLength, gridletHeight));
-         obb.Transform(Matrix.RotationZ(Orientation));
-         obb.Translate(new Vector3(X, Y, -1));
+         obb.Transform(Orientation);
+         obb.Translate(new Vector3(X, Y, Z));
          this.OrientedBoundingBox = obb;
 
          // Setup Grid
@@ -113,8 +113,10 @@ namespace Shade {
             for (var y = 0; y < YLength; y++) {
                var cellIndex = x + y * XLength;
                var cellHeight = Cells[cellIndex].Height;
-               //(cubeModelTransform * Matrix.Scaling(1, 1, cellHeight)) * Matrix.Translation(-gridlet.XLength * 0.5f + x, -gridlet.YLength * 0.5f + y, 0) * Matrix.RotationZ(gridlet.Orientation) * Matrix.Translation(gridlet.X, gridlet.Y, 0);
-               var cellTransform = Matrix.Translation(0.5f, 0.5f, 0.5f) * Matrix.Scaling(1, 1, cellHeight + 1) * Matrix.Translation(-XLength * 0.5f + x, -YLength * 0.5f + y, -1) * Matrix.RotationZ(Orientation) * Matrix.Translation(X, Y, 0);
+               var cellTransform = Matrix.Scaling(1, 1, cellHeight) * 
+                                   Matrix.Translation(-XLength * 0.5f + x + 0.5f, -YLength * 0.5f + y + 0.5f, 0) * 
+                                   Orientation * 
+                                   Matrix.Translation(X, Y, Z);
                Cells[cellIndex].OrientedBoundingBox = new OrientedBoundingBox { Extents = Vector3.One / 2, Transformation = cellTransform };
             }
          }

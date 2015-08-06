@@ -18,10 +18,11 @@ namespace Shade {
 
          var gridletFactory = new GridletFactory();
          IReadOnlyList<NavigationGridlet> gridlets = new List<NavigationGridlet> {
-            gridletFactory.Quad(0, 0, 0, 60, 60),
-            gridletFactory.Quad(37, 0, 0, 15, 7),
-            gridletFactory.Quad(41, -10.5f, 0, 7, 15),
-            gridletFactory.Quad(52, -10.5f, 0, 15, 7)
+//            gridletFactory.Quad(3, 0, 0, -0.3f, 0, 0, 15, 7),
+            gridletFactory.Quad(0, 0, 0, 0, 0, 0, 60, 60),
+            gridletFactory.Quad(37, 0, 2, -0.3f, 0, 0, 15, 7),
+            gridletFactory.Quad(47.5f, -4.0f, 4.25f, 0, 0, 0, 7, 15),
+            gridletFactory.Quad(58, -8.0f, 4.25f, 0, 0, 0, 15, 7)
          };
          var grid = new NavigationGrid(gridlets);
          grid.Initialize();
@@ -36,10 +37,10 @@ namespace Shade {
    }
 
    public class GridletFactory {
-      public NavigationGridlet Quad(float cx, float cy, float orientation, int xLength, int yLength) {
+      public NavigationGridlet Quad(float cx, float cy, float cz, float pitch, float yaw, float roll, int xLength, int yLength) {
          var cells = Util.Generate(xLength * yLength, i => new NavigationGridletCell(i, i % xLength, i / xLength));
          for (var i = 0; i < cells.Length; i++) {
-            cells[i].Height = 0.1f;
+            cells[i].Height = 1;
          }
          for (var y = 0; y < yLength; y++) {
             cells[y * xLength].Flags = CellFlags.Edge;
@@ -49,7 +50,8 @@ namespace Shade {
             cells[x].Flags = CellFlags.Edge;
             cells[x + xLength * (yLength - 1)].Flags = CellFlags.Edge;
          }
-         var gridlet = new NavigationGridlet { X = cx, Y = cy, XLength = xLength, YLength = yLength, Orientation = orientation, Cells = cells };
+         var gridlet = new NavigationGridlet { X = cx, Y = cy, Z = cz, XLength = xLength, YLength = yLength, Cells = cells };
+         gridlet.Orientation = Matrix.RotationZ(yaw) * Matrix.RotationY(pitch) * Matrix.RotationZ(roll);
          foreach (var cell in cells) {
             cell.Gridlet = gridlet;
          }
@@ -203,6 +205,11 @@ namespace Shade {
          basicEffect.World = characterModelTransform * Matrix.Scaling(2, 2, 2.8f) * Matrix.Translation(character.X, character.Y, character.Z);
          cube.Draw(basicEffect);
 
+         // Draw debug cube
+         basicEffect.DiffuseColor = new Vector4(0.0f, 1.0f, 0.0f, 1.0f);
+         basicEffect.World = Matrix.Identity;
+         cube.Draw(basicEffect);
+
          // Draw Character's Gridlet OBB
 //         foreach (var gridlet in navigationGrid.GetGridlets(character.X, character.Y)) {
 //            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
@@ -216,7 +223,10 @@ namespace Shade {
             GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
             var bb = gridlet.OrientedBoundingBox;
             basicEffect.DiffuseColor = new Vector4(1.0f, 0, 0, 1.0f);
-            basicEffect.World = Matrix.Scaling(bb.Extents * 2) * Matrix.Scaling(1.01f) * Matrix.Translation(bb.Center);
+            //            basicEffect.World = Matrix.Scaling(bb.Extents * 2) * gridlet.Orientation * Matrix.Translation(bb.Center);
+            basicEffect.World = Matrix.Scaling(bb.Extents * 2) * Matrix.Scaling(1.01f) * bb.Transformation;
+            //Matrix.Translation(0, 0, 0.5f) * Matrix.Scaling(gridlet.XLength, gridlet.YLength, gridlet.Cells.Max(x => x.Height)) * gridlet.Orientation * Matrix.Translation(gridlet.X, gridlet.Y, gridlet.Z);
+            //Matrix.Scaling(bb.Extents * 2) * bb.Transformation * Matrix.Translation(bb.Center);
             cube.Draw(basicEffect);
          }
 
@@ -258,16 +268,18 @@ namespace Shade {
          debugBatch.End();
 
          // Draw pathing
-         var path = pathfinder.FindPath(new Vector3(0, 0, 0), new Vector3(57, -8, 0));
-         var pathPoints = path.Points.ToArray();
-         debugBatch.Begin();
-         for (var i = 0; i < pathPoints.Length - 1; i++) {
-            debugBatch.DrawLine(
-               new VertexPositionColor(pathPoints[i], Color.Lime),
-               new VertexPositionColor(pathPoints[i + 1], Color.Lime)
-            );
+         var path = pathfinder.FindPath(new Vector3(0, 0, 0), new Vector3(58, -8, 4.25f));
+         if (path != null) {
+            var pathPoints = path.Points.ToArray();
+            debugBatch.Begin();
+            for (var i = 0; i < pathPoints.Length - 1; i++) {
+               debugBatch.DrawLine(
+                  new VertexPositionColor(pathPoints[i], Color.Lime),
+                  new VertexPositionColor(pathPoints[i + 1], Color.Lime)
+                  );
+            }
+            debugBatch.End();
          }
-         debugBatch.End();
 
          // Draw Gridlet Navmeshes
          debugEffect.DefaultParameters.WorldParameter.SetValue(Matrix.Identity);

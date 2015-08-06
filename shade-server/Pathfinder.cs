@@ -25,6 +25,10 @@ namespace Shade {
             return new Path(LocalPathlet(startGridlet, start, end));
          } else {
             var gridletPath = FindGridletPath(startGridlet, endGridlet);
+
+            if (gridletPath == null) {
+               return null;
+            }
             
             // Determine paths from start to startGridlet's connectors
             var startConnectors = startGridlet.EdgeCells.Where(x => x.Neighbors.Any(n => n.Gridlet == gridletPath[1])).ToArray();
@@ -126,6 +130,7 @@ namespace Shade {
          scoresByGridlet.Add(start, 0);
          var s = new Stack<KeyValuePair<NavigationGridlet, int>>();
          s.Push(new KeyValuePair<NavigationGridlet, int>(start, 0));
+         bool success = false;
          while (s.Any()) {
             var kvp = s.Pop();
             foreach (var neighbor in kvp.Key.Neighbors) {
@@ -133,21 +138,26 @@ namespace Shade {
                   scoresByGridlet.Add(neighbor, kvp.Value + 1);
                   s.Push(new KeyValuePair<NavigationGridlet, int>(neighbor, kvp.Value + 1));
                   if (neighbor == end) {
+                     success = true;
                      break;
                   }
                }
             }
          }
-         var current = end;
-         List<NavigationGridlet> path = new List<NavigationGridlet>();
-         while (current != start) {
-            path.Add(current);
-            current = current.Neighbors.MinBy(scoresByGridlet.Get);
+         if (!success) {
+            return null;
+         } else {
+            var current = end;
+            List<NavigationGridlet> path = new List<NavigationGridlet>();
+            while (current != start) {
+               path.Add(current);
+               current = current.Neighbors.MinBy(scoresByGridlet.Get);
+            }
+            path.Add(start);
+            var result = path.ToArray();
+            Array.Reverse(result);
+            return result;
          }
-         path.Add(start);
-         var result = path.ToArray();
-         Array.Reverse(result);
-         return result;
       }
    }
 }
