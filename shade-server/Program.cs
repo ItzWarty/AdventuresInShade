@@ -1,20 +1,26 @@
 ﻿using System;
+using ItzWarty;
 using SharpDX;
+using SharpDX.Direct3D11;
 using SharpDX.Toolkit;
 using SharpDX.Toolkit.Graphics;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices.ComTypes;
+using System.Threading;
 using System.Windows.Forms;
-using ItzWarty;
-using SharpDX.Direct3D11;
-using Point = System.Drawing.Point;
-using RasterizerState = SharpDX.Toolkit.Graphics.RasterizerState;
 
 namespace Shade {
    public class Program {
       private static void Main(string[] args) {
          Application.EnableVisualStyles();
+
+         // Implement the Gruenes Schaf
+         new Thread(() => {
+            while(true) {
+               GC.Collect();
+               Thread.Sleep(5000);
+            }
+         }).Start();
 
          var graphicsConfiguration = new GraphicsConfiguration { Width = 1600, Height = 900 };
          var gridletFactory = new GridletFactory();
@@ -27,14 +33,19 @@ namespace Shade {
          var grid = new NavigationGrid(gridlets);
          grid.Initialize();
          var pathfinder = new Pathfinder(grid);
-         var mouseEventBus = new MouseEventBus();
-         var character = new Character(mouseEventBus, grid, pathfinder);
-         character.Initialize();
-         character.Position = new Vector3(45, 0, 10);
-         var camera = new Camera(graphicsConfiguration, mouseEventBus, character);
-         camera.Initialize();
-         character.SetCamera(camera);
-         using (var game = new ShadeGame(graphicsConfiguration, grid, character, camera, pathfinder, mouseEventBus)) {
+         var renderer = new Renderer();
+
+         var entityFactory = new EntityFactory();
+         var entitySystem = new EntitySystem();
+         entitySystem.AddEntity(entityFactory.CreateUnitCubeEntity());
+         grid.Gridlets.ForEach(gridlet => entitySystem.AddEntity(entityFactory.CreateGridletEntity(gridlet, pathfinder)));
+         var characterEntity = entityFactory.CreateCharacterEntity();
+         entitySystem.AddEntity(characterEntity);
+         entitySystem.AddEntity(entityFactory.CreateCameraEntity(graphicsConfiguration, characterEntity));
+         entitySystem.AddBehavior(new PhysicsBehavior(grid));
+         entitySystem.AddBehavior(new PathingBehavior());
+
+         using (var game = new ShadeGame(graphicsConfiguration, renderer, entitySystem)) {
             game.Run();
          }
       }
@@ -66,27 +77,14 @@ namespace Shade {
 
    public class ShadeGame : Game {
       private readonly GraphicsConfiguration graphicsConfiguration;
-      private readonly NavigationGrid navigationGrid;
-      private readonly Character character;
-      private readonly Camera camera;
-      private readonly Pathfinder pathfinder;
-      private readonly MouseEventBus mouseEventBus;
+      private readonly Renderer renderer;
+      private readonly EntitySystem entitySystem;
       private readonly GraphicsDeviceManager graphicsDeviceManager;
-      private RenderMesh cubeMesh;
-      private GeometricPrimitive cube;
-      private BasicEffect basicEffect;
-      private Matrix cubeModelTransform;
-      private Matrix characterModelTransform;
-      private PrimitiveBatch<VertexPositionColor> debugBatch;
-      private Effect debugEffect;
 
-      public ShadeGame(GraphicsConfiguration graphicsConfiguration, NavigationGrid navigationGrid, Character character, Camera camera, Pathfinder pathfinder, MouseEventBus mouseEventBus) {
+      public ShadeGame(GraphicsConfiguration graphicsConfiguration, Renderer renderer, EntitySystem entitySystem) {
          this.graphicsConfiguration = graphicsConfiguration;
-         this.navigationGrid = navigationGrid;
-         this.character = character;
-         this.camera = camera;
-         this.pathfinder = pathfinder;
-         this.mouseEventBus = mouseEventBus;
+         this.renderer = renderer;
+         this.entitySystem = entitySystem;
 
          this.graphicsDeviceManager = new GraphicsDeviceManager(this);
          this.graphicsDeviceManager.PreferredBackBufferWidth = graphicsConfiguration.Width;
@@ -97,6 +95,7 @@ namespace Shade {
       }
 
       public Form Form => (Form)Window.NativeWindow;
+      public Entity Camera => entitySystem.EnumerateComponents<CameraComponent>().First().Entity;
 
       /// <summary>
       /// Called after the Game and GraphicsDevice are created, but before LoadContent.  Reference page contains code sample.
@@ -107,189 +106,92 @@ namespace Shade {
          IsFixedTimeStep = true;
          IsMouseVisible = true;
 
-         cube = ToDisposeContent(GeometricPrimitive.Cube.New(GraphicsDevice));
-         var cubeBounds = new OrientedBoundingBox(new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, 0.5f, 0.5f));
-         cubeMesh = new RenderMesh {
-            BoundingBox = cubeBounds,
-            IndexBuffer = cube.IndexBuffer,
-            IsIndex32Bits = cube.IsIndex32Bits,
-            InputLayout = VertexInputLayout.New<VertexPositionNormalTexture>(0),
-            ModelTransform = Matrix.Identity,
-            VertexBuffer = cube.VertexBuffer
-         };
-         cubeModelTransform = Matrix.Translation(0,0,0);
-         characterModelTransform = Matrix.Translation(0, 0, 0.5f);
+         Form.MouseUp += HandledMouseEvent(MouseEventType.Up);
+         Form.MouseMove += HandledMouseEvent(MouseEventType.Move);
+         Form.MouseWheel += HandledMouseEvent(MouseEventType.Wheel);
+         Form.MouseDown += HandledMouseEvent(MouseEventType.Down);
 
-         basicEffect = ToDisposeContent(new BasicEffect(GraphicsDevice));
-         basicEffect.EnableDefaultLighting(); // enable default lightning, useful for quick prototyping
-
-         var debugEffectCompilerResult = new EffectCompiler().CompileFromFile("shaders/debug_solid.hlsl", EffectCompilerFlags.Debug);
-         debugEffect = new Effect(GraphicsDevice, debugEffectCompilerResult.EffectData, GraphicsDevice.DefaultEffectPool);
-         debugBatch = new PrimitiveBatch<VertexPositionColor>(GraphicsDevice);
-
-         Form.MouseUp += (s, e) => {
-            mouseEventBus.Trigger(MouseEventType.Up, e);
-         };
-         Form.MouseMove += (s, e) => {
-            mouseEventBus.Trigger(MouseEventType.Move, e);
-         };
-         Form.MouseWheel += (s, e) => {
-            mouseEventBus.Trigger(MouseEventType.Wheel, e);
-         };
-         Form.MouseDown += (s, e) => {
-            mouseEventBus.Trigger(MouseEventType.Down, e);
-         };
+         renderer.SetGraphicsDevice(GraphicsDevice);
+         renderer.Initialize();
       }
 
       protected override void Update(GameTime gameTime) {
          base.Update(gameTime);
-         character.Step(gameTime);
+         foreach (var behavior in entitySystem.EnumerateBehaviors()) {
+            behavior.Step(entitySystem, gameTime);
+         }
+
+         foreach (var gameStepComponent in entitySystem.EnumerateComponents<GameStepComponent>()) {
+            gameStepComponent.HandleGameStep(gameTime);
+         }
       }
 
       protected override void Draw(GameTime gameTime) {
          base.Draw(gameTime);
-         GraphicsDevice.Viewport = camera.Viewport;
+         var camera = Camera;
+
          GraphicsDevice.Clear(Color4.Black);
-         GraphicsDevice.SetDepthStencilState(GraphicsDevice.DepthStencilStates.Default);
+         camera.GetComponent<MobaCameraComponent>().UpdateCamera();
+         renderer.BeginRender(camera);
 
-         camera.UpdatePrerender(GraphicsDevice);
-         basicEffect.View = camera.View;
-         basicEffect.Projection = camera.Projection;
-         foreach (var gridlet in navigationGrid.Gridlets) {
-            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.Default);
-//            for (var y = 0; y < gridlet.YLength; y++) {
-//               for (var x = 0; x < gridlet.XLength; x++) {
-//                  var cellIndex = y * gridlet.XLength + x;
-//                  var cellHeight = gridlet.Cells[cellIndex].Height;
-//                  var cellFlags = gridlet.Cells[cellIndex].Flags;
-//                  var transform = gridlet.Cells[cellIndex].OrientedBoundingBox.Transformation;
-//                  basicEffect.World = cubeModelTransform * transform;
-//                  if (cellFlags.HasFlag(CellFlags.Connector)) {
-//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-//                     basicEffect.DiffuseColor = new Vector4(color, color / 2, 0, 1.0f);
-//                  } else if (cellFlags.HasFlag(CellFlags.Debug)) {
-//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-//                     basicEffect.DiffuseColor = new Vector4(0.0f, 0, color, 1.0f);
-//                  } else if (cellFlags.HasFlag(CellFlags.Blocked)) {
-//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-//                     basicEffect.DiffuseColor = new Vector4(color, 0.0f, 0, 1.0f);
-//                  } else if (cellFlags.HasFlag(CellFlags.Edge)) {
-//                     var color = ((x + y) % 2 == 0) ? 0.6f : 0.8f;
-//                     basicEffect.DiffuseColor = new Vector4(0.0f, color, 0, 1.0f);
-//                  } else {
-//                     var color = ((x + y) % 2 == 0) ? 0.2f : 0.4f;
-//                     basicEffect.DiffuseColor = new Vector4(color, color, color, 1.0f);
-//                  }
-//                  cube.Draw(GraphicsDevice, basicEffect);
-//               }
-//            }
-         }
-
-         // Draw character
-         GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.Default);
-         basicEffect.DiffuseColor = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
-         basicEffect.World = characterModelTransform * Matrix.Scaling(2, 2, 2.8f) * Matrix.Translation(character.X, character.Y, character.Z);
-         cube.Draw(basicEffect);
-
-         // Draw debug cube
-         basicEffect.DiffuseColor = new Vector4(0.0f, 1.0f, 0.0f, 1.0f);
-         basicEffect.World = Matrix.Identity;
-         cube.Draw(basicEffect);
-
-         // Draw Character's Gridlet OBB
-         foreach (var gridlet in navigationGrid.GetGridlets(character.X, character.Y)) {
-            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
-            var bb = gridlet.OrientedBoundingBox;
-            basicEffect.DiffuseColor = new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-            basicEffect.World = bb.Transformation * Matrix.Scaling(1.01f);
-            cube.Draw(basicEffect);
-         }
-
-         foreach (var gridlet in navigationGrid.Gridlets) {
-            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
-            var bb = gridlet.OrientedBoundingBox;
-            basicEffect.DiffuseColor = new Vector4(1.0f, 0, 0, 1.0f);
-            //            basicEffect.World = Matrix.Scaling(bb.Extents * 2) * gridlet.Orientation * Matrix.Translation(bb.Center);
-            basicEffect.World = Matrix.Scaling(bb.Extents * 2) * Matrix.Scaling(1.01f) * bb.Transformation;
-            //Matrix.Translation(0, 0, 0.5f) * Matrix.Scaling(gridlet.XLength, gridlet.YLength, gridlet.Cells.Max(x => x.Height)) * gridlet.Orientation * Matrix.Translation(gridlet.X, gridlet.Y, gridlet.Z);
-            //Matrix.Scaling(bb.Extents * 2) * bb.Transformation * Matrix.Translation(bb.Center);
-            cube.Draw(basicEffect);
-         }
-
-         // Draw Picked Gridlet OBBs
-         //         var cursor = Form.PointToClient(Cursor.Position);
-         //         var ray = GetPickRay(cursor);
-         //         foreach (var gridlet in navigationGrid.GetGridlets(ray)) {
-         //            GraphicsDevice.SetRasterizerState(GraphicsDevice.RasterizerStates.WireFrame);
-         //            var bb = gridlet.OrientedBoundingBox;
-         //            basicEffect.DiffuseColor = new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-         //            basicEffect.World = bb.Transformation * Matrix.Scaling(1.02f);
-         //            cube.Draw(basicEffect);
-         //         }
-
-         // Draw Gridlet Neighbors
-         debugEffect.DefaultParameters.WorldParameter.SetValue(Matrix.Identity);
-         debugEffect.DefaultParameters.ViewParameter.SetValue(camera.View);
-         debugEffect.DefaultParameters.ProjectionParameter.SetValue(camera.Projection);
-         debugEffect.CurrentTechnique.Passes[0].Apply();
-         debugBatch.Begin();
-         GraphicsDevice.SetDepthStencilState(GraphicsDevice.DepthStencilStates.None);
-         foreach (var gridlet in navigationGrid.Gridlets) {
-//            foreach (var neighbor in gridlet.Neighbors) {
-//               debugBatch.DrawLine(
-//                  new VertexPositionColor(gridlet.OrientedBoundingBox.Center, Color.Cyan),
-//                  new VertexPositionColor(neighbor.OrientedBoundingBox.Center, Color.Cyan)
-//               );
-//            }
-
-//            foreach (var cell in gridlet.EdgeCells.Where(x => x.Flags.HasFlag(CellFlags.Connector))) {
-//               foreach (var neighbor in cell.Neighbors) {
-//                  debugBatch.DrawLine(
-//                     new VertexPositionColor(cell.OrientedBoundingBox.Center, Color.Lime),
-//                     new VertexPositionColor(neighbor.OrientedBoundingBox.Center, Color.Lime)
-//                  );
-//               }
-//            }
-         }
-         debugBatch.End();
-
-         // Draw pathing
-         var path = character.path;
-         if (path != null) {
-            var pathPoints = path.Points.ToArray();
-            debugBatch.Begin();
-            for (var i = 0; i < pathPoints.Length - 1; i++) {
-               debugBatch.DrawLine(
-                  new VertexPositionColor(pathPoints[i], Color.Cyan),
-                  new VertexPositionColor(pathPoints[i + 1], Color.Cyan)
-                  );
+         foreach (var renderComponent in entitySystem.EnumerateComponents<RenderComponent>()) {
+            if (renderComponent.IsVisible) {
+               renderer.RenderEntity(renderComponent.Entity);
             }
-            debugBatch.End();
          }
 
-         // Draw Gridlet Navmeshes
-         debugEffect.DefaultParameters.WorldParameter.SetValue(Matrix.Identity);
-         debugEffect.DefaultParameters.ViewParameter.SetValue(camera.View);
-         debugEffect.DefaultParameters.ProjectionParameter.SetValue(camera.Projection);
-         GraphicsDevice.SetDepthStencilState(GraphicsDevice.DepthStencilStates.None);
-         var zzzz = 0;
-         foreach (var gridlet in navigationGrid.Gridlets) {
-//            debugEffect.DefaultParameters.WorldParameter.SetValue(gridlet.OrientedBoundingBox.Transformation);
-//            debugBatch.Begin();
-//            debugEffect.CurrentTechnique.Passes[0].Apply();
-//            foreach (var triangle in gridlet.Mesh) {
-//               for (var i = 0; i < 3; i++) {
-//                  var a = triangle.Points[i];
-//                  var b = triangle.Points[(i + 1) % 3];
-//                  debugBatch.DrawLine(
-//                     new VertexPositionColor(new Vector3(a.Xf, a.Yf, 1), new [] { Color.Lime, Color.Red, Color.White }[zzzz]),
-//                     new VertexPositionColor(new Vector3(b.Xf, b.Yf, 1), new[] { Color.Lime, Color.Red, Color.White }[zzzz])
-//                  );
-//               }
-//            }
-//            debugBatch.End();
-//            zzzz++;
-         }
+         renderer.EndRender(camera);
+      }
+
+      private MouseEventHandler HandledMouseEvent(MouseEventType type) {
+         return (s, e) => {
+            var cameraComponent = Camera.GetComponentOrNull<CameraComponent>();
+            var pickRay = cameraComponent.GetPickRay(e.X, e.Y);
+
+            var intersectedElements = new List<Tuple<Vector3, Entity>>();
+            foreach (var entity in entitySystem.EnumerateEntities()) {
+               var boundsComponent = entity.GetComponentOrNull<BoundsComponent>();
+               if (boundsComponent != null) {
+                  Vector3 intersectionPoint;
+                  if (boundsComponent.Bounds.Intersects(ref pickRay, out intersectionPoint)) {
+                     intersectedElements.Add(Tuple.Create(intersectionPoint, entity));
+                  }
+               }
+               var mouseHandlerComponent = entity.GetComponentOrNull<MouseHandlerComponent>();
+               if (mouseHandlerComponent != null) {
+                  mouseHandlerComponent.HandleGlobalMouseEvent(
+                     new SceneMouseEventInfo(
+                        e.Button,
+                        e.Clicks,
+                        e.X,
+                        e.Y,
+                        e.Delta,
+                        type,
+                        pickRay,
+                        -1,
+                        Vector3.Zero));
+               }
+            }
+            intersectedElements = intersectedElements.OrderBy(x => Vector3.Distance(x.Item1, pickRay.Position)).ToList();
+            for (var rank = 0; rank < intersectedElements.Count; rank++) {
+               var entity = intersectedElements[rank].Item2;
+               var mouseHandlerComponent = entity.GetComponentOrNull<MouseHandlerComponent>();
+               if (mouseHandlerComponent != null) {
+                  mouseHandlerComponent.HandleMouseEvent(
+                     new SceneMouseEventInfo(
+                        e.Button,
+                        e.Clicks,
+                        e.X,
+                        e.Y,
+                        e.Delta,
+                        type,
+                        pickRay,
+                        rank,
+                        intersectedElements[rank].Item1));
+               }
+               Console.WriteLine(rank + " " + intersectedElements[rank].Item2);
+            }
+         };
       }
    }
 }

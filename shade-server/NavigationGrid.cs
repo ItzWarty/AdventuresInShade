@@ -67,6 +67,14 @@ namespace Shade {
          }
          return results.OrderBy(x => x.Value).Select(x => x.Key);
       }
+
+      public NavigationGridletCell GetCell(Vector3 position) {
+         var query = new Ray(position - Vector3.UnitZ * 10000f, new Vector3(0, 0, 1));
+         var gridlets = GetGridlets(query);
+         var cells = gridlets.SelectMany(x => x.GetCells(query).Select(x.PairValue));
+         var highestCell = cells.MaxBy(x => x.Value.Height).Value;
+         return highestCell;
+      }
    }
 
    public class NavigationGridletCell {

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using SharpDX;
 
 namespace Shade {
    public class EventBus<TEventArgs> {
@@ -15,8 +16,8 @@ namespace Shade {
    }
 
    public class MouseEventBus : EventBus<MouseEventInfo> {
-      public void Trigger(MouseEventType type, MouseEventArgs e) {
-         Trigger(new MouseEventInfo(e.Button, e.Clicks, e.X, e.Y, e.Delta, type));
+      public void Trigger(MouseEventType type, MouseEventArgs e, Ray pickRay) {
+         Trigger(new MouseEventInfo(e.Button, e.Clicks, e.X, e.Y, e.Delta, type, pickRay));
       }
    }
 
@@ -27,14 +28,16 @@ namespace Shade {
       private readonly int y;
       private readonly int delta;
       private readonly MouseEventType type;
+      private readonly Ray pickRay;
 
-      public MouseEventInfo(MouseButtons button, int clicks, int x, int y, int delta, MouseEventType type) {
+      public MouseEventInfo(MouseButtons button, int clicks, int x, int y, int delta, MouseEventType type, Ray pickRay) {
          this.button = button;
          this.clicks = clicks;
          this.x = x;
          this.y = y;
          this.delta = delta;
          this.type = type;
+         this.pickRay = pickRay;
       }
 
       public MouseButtons Button => button;
@@ -43,6 +46,20 @@ namespace Shade {
       public int Y => y;
       public int Delta => delta;
       public MouseEventType Type => type;
+      public Ray PickRay => pickRay;
+   }
+
+   public class SceneMouseEventInfo : MouseEventInfo {
+      private readonly int rank;
+      private Vector3 intersectionPoint;
+
+      public SceneMouseEventInfo(MouseButtons button, int clicks, int x, int y, int delta, MouseEventType type, Ray pickRay, int rank, Vector3 intersectionPoint) : base(button, clicks, x, y, delta, type, pickRay) {
+         this.rank = rank;
+         this.intersectionPoint = intersectionPoint;
+      }
+
+      public int Rank => rank;
+      public Vector3 IntersectionPoint => intersectionPoint;
    }
 
    public enum MouseEventType {
