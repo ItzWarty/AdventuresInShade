@@ -25,6 +25,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -78,11 +79,13 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="DebugClickableBox.cs" />
+    <Compile Include="DungeonGenerator.cs" />
     <Compile Include="Entity.cs" />
     <Compile Include="EventBus.cs" />
     <Compile Include="GraphicsConfiguration.cs" />
-    <None Include="DungeonKeyInventory.cs" />
+    <Compile Include="DungeonKeyInventory.cs" />
     <None Include="NavigationGridletElement.cs" />
+    <Compile Include="GridletComponent.cs" />
     <Compile Include="NavigationGrid.cs" />
     <Compile Include="NavigationMesh.cs" />
     <Compile Include="Pathfinder.cs" />
@@ -103,6 +106,14 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\DerpDerpGridStuff\DerpDerpGridStuff.csproj">
+      <Project>{6ae946f6-23d4-41be-b4fb-77d6f803efeb}</Project>
+      <Name>DerpDerpGridStuff</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\ItzWarty.Geometry\ItzWarty.Geometry.csproj">
+      <Project>{ff6e37db-d691-4600-be32-ff3d77ee8c5b}</Project>
+      <Name>ItzWarty.Geometry</Name>
+    </ProjectReference>
     <ProjectReference Include="..\third-party\Poly2Tri\Poly2Tri.csproj">
       <Project>{C5E5802D-6A45-4FE9-BAE7-5F0AE91D72C1}</Project>
       <Name>Poly2Tri</Name>

@@ -1,31 +1,32 @@
-﻿using System;
+﻿using ItzWarty;
 using ItzWarty.Collections;
 using Shade.Annotations;
 using SharpDX;
+using SharpDX.Toolkit;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Forms;
-using ItzWarty;
-using SharpDX.Toolkit;
+using SharpDX.Toolkit.Graphics;
+using ICL = ItzWarty.Collections;
 
 namespace Shade {
    public class EntityFactory {
       public Entity CreateUnitCubeEntity() {
          var entity = new Entity();
-         AddAndInitialize(entity, new PositionComponent(Vector3.UnitY * 10));
-         AddAndInitialize(entity, new SizeComponent(Vector3.One * 3, VerticalPositioningMode.PositionBottom));
-         AddAndInitialize(entity, new OrientationComponent(Quaternion.RotationAxis(Vector3.UnitZ, MathUtil.PiOverFour)));
+         AddAndInitialize(entity, new PositionComponent(Vector3.UnitY));
+         AddAndInitialize(entity, new SizeComponent(Vector3.One, VerticalPositioningMode.PositionBottom));
+         AddAndInitialize(entity, new OrientationComponent(Quaternion.Identity));
          AddAndInitialize(entity, new BoundsComponent());
          AddAndInitialize(entity, new ColorComponent(new Vector4(0, 1, 0, 1)));
-         AddAndInitialize(entity, new PhysicsComponent(true));
+         AddAndInitialize(entity, new PhysicsComponent());
          AddAndInitialize(entity, new RenderComponent(true));
          return entity;
       }
 
-      public Entity CreateGridletEntity(NavigationGridlet gridlet, Pathfinder pathfinder) {
+      public Entity CreateAndAssociateGridletEntity(NavigationGrid navigationGrid, NavigationGridlet gridlet, Pathfinder pathfinder, CommandFactory commandFactory) {
          var entity = new Entity();
          AddAndInitialize(entity, new PositionComponent(new Vector3(gridlet.X, gridlet.Y, gridlet.Z)));
          AddAndInitialize(entity, new SizeComponent(new Vector3(gridlet.XLength, gridlet.YLength, 1), VerticalPositioningMode.PositionCenter));
@@ -33,27 +34,28 @@ namespace Shade {
          AddAndInitialize(entity, new BoundsComponent());
          AddAndInitialize(entity, new ColorComponent(Vector4.One));
          AddAndInitialize(entity, new MouseHandlerComponent());
-         AddAndInitialize(entity, new GridletPathingTargetComponent(gridlet, pathfinder));
+         AddAndInitialize(entity, new GridletPathingTargetComponent(gridlet, pathfinder, commandFactory));
          AddAndInitialize(entity, new RenderComponent(true));
+         AddAndInitialize(entity, new GridletComponent(navigationGrid, gridlet));
+         gridlet.Entity = entity;
          return entity;
       }
 
-      public Entity CreateCharacterEntity() {
+      public Entity CreateCharacterEntity(Pathfinder pathfinder) {
          var entity = new Entity();
-         AddAndInitialize(entity, new PositionComponent(Vector3.Zero));
+         AddAndInitialize(entity, new PositionComponent(new Vector3(0, 0, 0)));
          AddAndInitialize(entity, new SizeComponent(new Vector3(2, 2, 2.8f), VerticalPositioningMode.PositionBottom));
          AddAndInitialize(entity, new OrientationComponent(Quaternion.Identity));
          AddAndInitialize(entity, new BoundsComponent());
          AddAndInitialize(entity, new ColorComponent(new Vector4(1, 0, 0, 1)));
-         AddAndInitialize(entity, new PhysicsComponent(true));
+         AddAndInitialize(entity, new PhysicsComponent());
          AddAndInitialize(entity, new CharacterComponent());
-         AddAndInitialize(entity, new SpeedComponent(10));
-         AddAndInitialize(entity, new PathingComponent());
+         AddAndInitialize(entity, new SpeedComponent(10 * 20));
          AddAndInitialize(entity, new RenderComponent(true));
          AddAndInitialize(entity, new MobaCameraTargetComponent(true));
+         AddAndInitialize(entity, new CommandQueueComponent());
          return entity;
       }
-
 
       public Entity CreateCameraEntity(GraphicsConfiguration graphicsConfiguration, Entity followedEntity) {
          var entity = new Entity();
@@ -63,6 +65,52 @@ namespace Shade {
          AddAndInitialize(entity, new MouseHandlerComponent());
          AddAndInitialize(entity, new CameraComponent(graphicsConfiguration));
          AddAndInitialize(entity, new MobaCameraComponent(graphicsConfiguration, followedEntity));
+         return entity;
+      }
+
+      public Entity CreateDungeonKeyEntity(Vector3 position, Vector4 color, CommandFactory commandFactory, DungeonKeyInventory dungeonKeyInventory) {
+         var entity = new Entity();
+         AddAndInitialize(entity, new PositionComponent(position));
+         AddAndInitialize(entity, new SizeComponent(new Vector3(0.8f, 1.28f, 0.5f) * 30, VerticalPositioningMode.PositionBottom));
+         AddAndInitialize(entity, new OrientationComponent(Quaternion.RotationAxis(Vector3.UnitZ, StaticRandom.NextFloat(1))));
+         AddAndInitialize(entity, new BoundsComponent());
+         AddAndInitialize(entity, new ColorComponent(color));
+         AddAndInitialize(entity, new PhysicsComponent());
+         AddAndInitialize(entity, new RenderComponent(true));
+         AddAndInitialize(entity, new MouseHandlerComponent());
+         AddAndInitialize(entity, new InteractableComponent(commandFactory));
+         AddAndInitialize(entity, new DungeonKeyComponent(dungeonKeyInventory));
+         return entity;
+      }
+
+      public Entity CreateDungeonLockEntity(Vector3 position, Vector4 color, CommandFactory commandFactory, DungeonKeyInventory dungeonKeyInventory, NavigationGrid navigationGrid) {
+         var entity = new Entity();
+         AddAndInitialize(entity, new PositionComponent(position));
+         AddAndInitialize(entity, new SizeComponent(new Vector3(6), VerticalPositioningMode.PositionBottom));
+         AddAndInitialize(entity, new OrientationComponent(Quaternion.Identity));
+         AddAndInitialize(entity, new BoundsComponent());
+         AddAndInitialize(entity, new ColorComponent(color));
+         AddAndInitialize(entity, new PhysicsComponent());
+         AddAndInitialize(entity, new RenderComponent(true));
+         AddAndInitialize(entity, new MouseHandlerComponent());
+         AddAndInitialize(entity, new InteractableComponent(commandFactory));
+         AddAndInitialize(entity, new CommandQueueComponent());
+         AddAndInitialize(entity, new DungeonLockComponent(this, commandFactory, dungeonKeyInventory, navigationGrid));
+         return entity;
+      }
+
+      public Entity CreateDungeonDoorEntity(Entity lockEntity, Vector3 position, Vector4 color, CommandFactory commandFactory, DungeonKeyInventory dungeonKeyInventory) {
+         var entity = new Entity();
+         AddAndInitialize(entity, new PositionComponent(position));
+         AddAndInitialize(entity, new SizeComponent(new Vector3(6), VerticalPositioningMode.PositionBottom));
+         AddAndInitialize(entity, new OrientationComponent(Quaternion.Identity));
+         AddAndInitialize(entity, new BoundsComponent());
+         AddAndInitialize(entity, new ColorComponent(color));
+//         AddAndInitialize(entity, new PhysicsComponent());
+         AddAndInitialize(entity, new RenderComponent(true));
+         AddAndInitialize(entity, new MouseHandlerComponent());
+         AddAndInitialize(entity, new InteractableComponent(commandFactory));
+         AddAndInitialize(entity, new DungeonDoorComponent(lockEntity, dungeonKeyInventory));
          return entity;
       }
 
@@ -184,7 +232,7 @@ namespace Shade {
             Vector4 result = Vector4.Transform(new Vector4(0, -currentRadius, 0, 1.0f), transform);
 
             var view = Matrix.LookAtRH(new Vector3(result.X, result.Y, result.Z) + targetPosition, targetPosition, Vector3.UnitZ);
-            var projection = Matrix.PerspectiveFovRH(MathUtil.DegreesToRadians(60.0f), (float)graphicsConfiguration.Width / graphicsConfiguration.Height, 0.5f, 200.0f);
+            var projection = Matrix.PerspectiveFovRH(MathUtil.DegreesToRadians(60.0f), (float)graphicsConfiguration.Width / graphicsConfiguration.Height, 0.5f, 20000.0f);
 
             cameraComponent.UpdateViewProjection(view, projection);
          }
@@ -359,23 +407,38 @@ namespace Shade {
    }
 
    public class PhysicsComponent : EntityComponent {
-      private bool isPhysicsEnabled;
+      private int disableCounter = 0;
 
-      public PhysicsComponent(bool isPhysicsEnabled) {
-         this.isPhysicsEnabled = isPhysicsEnabled;
+      public bool IsPhysicsEnabled => disableCounter == 0;
+
+      public void Disable() {
+         disableCounter++;
       }
 
-      public bool IsPhysicsEnabled { get { return isPhysicsEnabled; } set { isPhysicsEnabled = value; OnPropertyChanged(); } }
+      public void Enable() {
+         disableCounter--;
+         Console.WriteLine("DISABLE COUNTER AT " + disableCounter);
+      }
+   }
+
+   public class RenderEventArgs {
+      public Renderer Renderer { get; set; }
+      public GraphicsDevice GraphicsDevice { get; set; }
+      public BasicEffect BasicEffect { get; set; }
    }
 
    public class RenderComponent : EntityComponent {
       private bool isVisible;
+      private bool isCustomRendered = false;
+      public event EventHandler<RenderEventArgs> Render;
 
       public RenderComponent(bool isVisible) {
          this.isVisible = isVisible;
       }
 
+      public void HandleOnRender(RenderEventArgs e) => Render?.Invoke(this, e);
       public bool IsVisible { get { return isVisible; } set { isVisible = value; OnPropertyChanged(); } }
+      public bool IsCustomRendered { get { return isCustomRendered; } set { isCustomRendered = value; OnPropertyChanged(); } }
    }
 
    public class MouseHandlerComponent : EntityComponent {
@@ -403,8 +466,27 @@ namespace Shade {
       public GameTime GameTime { get; set; }
    }
 
+   public class EntityInteractionEventArgs : EventArgs {
+      private readonly Entity interactor;
+      private readonly Entity target;
+
+      public EntityInteractionEventArgs(Entity interactor, Entity target) {
+         this.interactor = interactor;
+         this.target = target;
+      }
+
+      public Entity Interactor => interactor;
+      public Entity Target => target;
+   }
+
    public class InteractableComponent : EntityComponent {
+      private readonly CommandFactory commandFactory;
       private MouseHandlerComponent mouseHandlerComponent;
+      public event EventHandler<EntityInteractionEventArgs> Interaction;
+
+      public InteractableComponent(CommandFactory commandFactory) {
+         this.commandFactory = commandFactory;
+      }
 
       public override void Initialize() {
          base.Initialize();
@@ -413,11 +495,113 @@ namespace Shade {
       }
 
       private void HandleMouseEvent(object sender, SceneMouseEventInfo e) {
-         Console.WriteLine("Clicked!");
+         if (e.Button.HasFlag(MouseButtons.Left)) {
+            Console.WriteLine("!!!! PATHING ");
+            var character = EntitySystem.EnumerateComponents<CharacterComponent>().First().Entity;
+            var commandQueueComponent = character.GetComponent<CommandQueueComponent>();
+            commandQueueComponent.AddCommand(commandFactory.PathingCommand(character, Entity));
+            commandQueueComponent.AddCommand(commandFactory.ActionCommand(OnInteractionHandler(character)), false);
+         }
+      }
+
+      private Action OnInteractionHandler(Entity interactor) {
+         return () => {
+            Interaction?.Invoke(this, new EntityInteractionEventArgs(interactor, Entity));
+         };
       }
    }
 
    public class CharacterComponent : EntityComponent { }
+
+   public class DungeonKeyComponent : EntityComponent {
+      private readonly DungeonKeyInventory dungeonKeyInventory;
+
+      public DungeonKeyComponent(DungeonKeyInventory dungeonKeyInventory) {
+         this.dungeonKeyInventory = dungeonKeyInventory;
+      }
+
+      public override void Initialize() {
+         base.Initialize();
+         var interactableComponent = Entity.GetComponent<InteractableComponent>();
+         interactableComponent.Interaction += HandleInteraction;
+      }
+
+      private void HandleInteraction(object sender, EntityInteractionEventArgs e) {
+         var colorComponent = Entity.GetComponent<ColorComponent>();
+         dungeonKeyInventory.Keys.Add(colorComponent.Color);
+         EntitySystem.RemoveEntity(Entity);
+      }
+   }
+
+   public class DungeonLockComponent : EntityComponent {
+      private readonly List<Entity> childEntities = new List<Entity>();
+      private readonly EntityFactory entityFactory;
+      private readonly CommandFactory commandFactory;
+      private readonly DungeonKeyInventory dungeonKeyInventory;
+      private readonly NavigationGrid navigationGrid;
+
+      public DungeonLockComponent(EntityFactory entityFactory, CommandFactory commandFactory, DungeonKeyInventory dungeonKeyInventory, NavigationGrid navigationGrid) {
+         this.entityFactory = entityFactory;
+         this.commandFactory = commandFactory;
+         this.dungeonKeyInventory = dungeonKeyInventory;
+         this.navigationGrid = navigationGrid;
+      }
+
+      public override void Initialize() {
+         base.Initialize();
+         var colorComponent = Entity.GetComponent<ColorComponent>();
+         var positionComponent = Entity.GetComponent<PositionComponent>();
+         var commandComponent = Entity.GetComponent<CommandQueueComponent>();
+         commandComponent.AddCommand(commandFactory.ActionCommand(() => {
+            var r = 40;
+            childEntities.Add(entityFactory.CreateDungeonDoorEntity(Entity, positionComponent.Position + new Vector3(r, 0, 0), colorComponent.Color, commandFactory, dungeonKeyInventory));
+            childEntities.Add(entityFactory.CreateDungeonDoorEntity(Entity, positionComponent.Position + new Vector3(-r, 0, 0), colorComponent.Color, commandFactory, dungeonKeyInventory));
+            childEntities.Add(entityFactory.CreateDungeonDoorEntity(Entity, positionComponent.Position + new Vector3(0, r, 0), colorComponent.Color, commandFactory, dungeonKeyInventory));
+            childEntities.Add(entityFactory.CreateDungeonDoorEntity(Entity, positionComponent.Position + new Vector3(0, -r, 0), colorComponent.Color, commandFactory, dungeonKeyInventory));
+            childEntities.ForEach(EntitySystem.AddEntity);
+         }));
+
+         var position = positionComponent.Position;
+         var gridlet = navigationGrid.GetGridlets(position.X, position.Y).First();
+         var gridletEntity = gridlet.Entity;
+         gridletEntity.GetComponent<GridletComponent>().IsPathingEnabled = false;
+      }
+
+      public void HandleInteraction(object sender, EntityInteractionEventArgs e) {
+         var colorComponent = Entity.GetComponent<ColorComponent>();
+         if (dungeonKeyInventory.Keys.Remove(colorComponent.Color)) {
+            childEntities.ForEach(EntitySystem.RemoveEntity);
+            EntitySystem.RemoveEntity(Entity);
+
+            var positionComponent = Entity.GetComponent<PositionComponent>();
+            var position = positionComponent.Position;
+            var gridlet = navigationGrid.GetGridlets(position.X, position.Y).First();
+            var gridletEntity = gridlet.Entity;
+            gridletEntity.GetComponent<GridletComponent>().IsPathingEnabled = true;
+         }
+      }
+   }
+
+   public class DungeonDoorComponent : EntityComponent {
+      private readonly Entity lockEntity;
+      private readonly DungeonKeyInventory dungeonKeyInventory;
+
+      public DungeonDoorComponent(Entity lockEntity, DungeonKeyInventory dungeonKeyInventory) {
+         this.lockEntity = lockEntity;
+         this.dungeonKeyInventory = dungeonKeyInventory;
+      }
+
+      public override void Initialize() {
+         base.Initialize();
+         var interactableComponent = Entity.GetComponent<InteractableComponent>();
+         interactableComponent.Interaction += HandleInteraction;
+      }
+
+      private void HandleInteraction(object sender, EntityInteractionEventArgs e) {
+         var lockComponent = lockEntity.GetComponent<DungeonLockComponent>();
+         lockComponent.HandleInteraction(sender, e);
+      }
+   }
 
    public class SpeedComponent : EntityComponent {
       private float speed;
@@ -429,27 +613,178 @@ namespace Shade {
       public float Speed { get { return speed; } set { speed = value; OnPropertyChanged(); } }
    }
 
-   public class PathingComponent : EntityComponent {
+   public class CommandFactory {
+      private readonly Pathfinder pathfinder;
+
+      public CommandFactory(Pathfinder pathfinder) {
+         this.pathfinder = pathfinder;
+      }
+
+      public Command PathingCommand(Entity entity, Vector3 destination) {
+         var positionComponent = entity.GetComponent<PositionComponent>();
+         var path = pathfinder.FindPath(positionComponent.Position, destination);
+         return new PathingCommand(entity, path);
+      }
+
+      public Command PathingCommand(Entity entity, Entity otherEntity) {
+         var thisPosition = entity.GetComponent<PositionComponent>().Position;
+         var thisBounds = entity.GetComponent<BoundsComponent>().Bounds;
+         var thisCylinderRadius = Math.Sqrt(thisBounds.Extents.X * thisBounds.Extents.X + thisBounds.Extents.Y * thisBounds.Extents.Y);
+         var otherPosition = otherEntity.GetComponent<PositionComponent>().Position;
+         var otherBounds = otherEntity.GetComponent<BoundsComponent>().Bounds;
+         var otherCylinderRadius = Math.Sqrt(otherBounds.Extents.X * otherBounds.Extents.X + otherBounds.Extents.Y * otherBounds.Extents.Y);
+         var navigationPath = pathfinder.FindPath(thisPosition, otherPosition);
+         var distanceToEat = otherCylinderRadius + thisCylinderRadius;
+         if (navigationPath.Length < distanceToEat) {
+            Console.WriteLine("PATH TOO SMALL");
+            return new PathingCommand(entity, null);
+         } else {
+            Console.WriteLine("PATH NOT TO SMALL");
+            var points = navigationPath.Points;
+            var pointsToKeep = points.Length;
+            Console.WriteLine(points.Join(","));
+            while (distanceToEat > 0) {
+               Console.WriteLine("DISTANCE TO EAT " + distanceToEat);
+               var a = points[pointsToKeep - 2];
+               var b = points[pointsToKeep - 1];
+               var abDistance = Vector3.Distance(a, b);
+               Console.WriteLine("AB DIST " + abDistance);
+               if (abDistance < distanceToEat) {
+                  distanceToEat -= abDistance;
+                  pointsToKeep--;
+               } else {
+                  var baVect = b - a;
+                  baVect.Normalize();
+                  b = a + baVect * (float)(abDistance - distanceToEat);
+                  points[pointsToKeep - 1] = b;
+                  distanceToEat = -1;
+               }
+            }
+            points = points.SubArray(0, pointsToKeep);
+            return new PathingCommand(entity, new NavigationPath(points));
+         }
+      }
+
+      public Command ActionCommand(Action action) {
+         return new ActionCommand(action);
+      }
+   }
+
+   public abstract class Command {
+      public abstract void HandleEnter(Entity entity);
+      public abstract void HandleTick(Entity entity, GameTime gameTime);
+      public abstract void HandleLeave(Entity entity);
+      public abstract bool IsCompleted { get; }
+   }
+
+   public class PathingCommand : Command {
+      private readonly Entity entity;
+      private readonly PositionComponent positionComponent;
+      private readonly SpeedComponent speedComponent;
+      private readonly PhysicsComponent physicsComponent;
       private NavigationPath path;
       private int progress;
 
-      public NavigationPath Path { get { return path; } set { path = value; OnPropertyChanged(); } }
-      public int Progress { get { return progress; } set { progress = value; OnPropertyChanged(); } }
-
-      public void BeginPathing(NavigationPath path) {
+      public PathingCommand(Entity entity, NavigationPath path) {
+         this.entity = entity;
          this.path = path;
          this.progress = 0;
+         this.positionComponent = entity.GetComponent<PositionComponent>();
+         this.speedComponent = entity.GetComponent<SpeedComponent>();
+         this.physicsComponent = entity.GetComponent<PhysicsComponent>();
       }
+
+      public NavigationPath Path => path;
+      public override bool IsCompleted => path == null;
+
+      public override void HandleEnter(Entity entity) {
+         Console.WriteLine("PATHING ENTER");
+         physicsComponent.Disable();
+      }
+
+      public override void HandleTick(Entity entity, GameTime gameTime) {
+         Console.WriteLine("PATHING TICK");
+         var speed = speedComponent.Speed;
+         var position = positionComponent.Position;
+
+         if (path != null) {
+            var movementUnitsRemaining = speed * (float)gameTime.ElapsedGameTime.TotalSeconds;
+            while (movementUnitsRemaining > 0 && progress < path.Points.Length) {
+               var nextPoint = path.Points[progress];
+               var distanceToNextPoint = Vector3.Distance(position, nextPoint);
+               if (movementUnitsRemaining >= distanceToNextPoint) {
+                  movementUnitsRemaining -= distanceToNextPoint;
+                  position = nextPoint;
+                  progress++;
+               } else {
+                  var dir = nextPoint - position;
+                  dir.Normalize();
+                  position += dir * movementUnitsRemaining;
+                  movementUnitsRemaining = 0;
+               }
+            }
+            if (progress == path.Points.Length) {
+               this.progress = -1;
+               this.path = null;
+            }
+            positionComponent.Position = position;
+         }
+      }
+
+      public override void HandleLeave(Entity entity) {
+         Console.WriteLine("PATHING LEAVE");
+         physicsComponent.Enable();
+      }
+   }
+
+   public class ActionCommand : Command {
+      private readonly Action action; 
+      private bool hasRun = false;
+
+      public ActionCommand(Action action) {
+         this.action = action;
+      }
+
+      public override bool IsCompleted => hasRun;
+
+      public override void HandleEnter(Entity entity) {
+         action();
+         hasRun = false;
+      }
+
+      public override void HandleTick(Entity entity, GameTime gameTime) { }
+
+      public override void HandleLeave(Entity entity) { }
+   }
+
+   public class CommandQueueComponent : EntityComponent {
+      private readonly ConcurrentQueue<Command> commandQueue = new ConcurrentQueue<Command>();
+      private Command currentCommand;
+
+      public void AddCommand(Command command, bool force = true) {
+         if (force) {
+            CurrentCommand?.HandleLeave(Entity);
+            CurrentCommand = null;
+            Command throwaway;
+            while (commandQueue.TryDequeue(out throwaway)) ;
+         }
+         commandQueue.Enqueue(command);
+      }
+
+      public IConcurrentQueue<Command> CommandQueue => commandQueue;
+      public Command CurrentCommand { get { return currentCommand; } set { currentCommand = value; OnPropertyChanged(); } }
    }
 
    public class GridletPathingTargetComponent : EntityComponent {
       private readonly NavigationGridlet gridlet;
       private readonly Pathfinder pathfinder;
+      private readonly CommandFactory commandFactory;
       private MouseHandlerComponent mouseHandlerComponent;
 
-      public GridletPathingTargetComponent(NavigationGridlet gridlet, Pathfinder pathfinder) {
+      public GridletPathingTargetComponent(NavigationGridlet gridlet, Pathfinder pathfinder, CommandFactory commandFactory) {
          this.gridlet = gridlet;
          this.pathfinder = pathfinder;
+         this.commandFactory = commandFactory;
       }
 
       public override void Initialize() {
@@ -462,11 +797,8 @@ namespace Shade {
          if (e.Button == MouseButtons.Right) {
             var characterEntity = EntitySystem.EnumerateComponents<CharacterComponent>().Select(x => x.Entity).First();
             var positionComponent = characterEntity.GetComponent<PositionComponent>();
-            var pathingComponent = characterEntity.GetComponent<PathingComponent>();
-            var gridletIntersection = e.IntersectionPoint;
-            var path = pathfinder.FindPath(positionComponent.Position, gridletIntersection);
-            pathingComponent.BeginPathing(path);
-            Console.WriteLine(path.Points.Join(", "));
+            var commandQueueComponent = characterEntity.GetComponent<CommandQueueComponent>();
+            commandQueueComponent.AddCommand(commandFactory.PathingCommand(characterEntity, e.IntersectionPoint));
          }
       }
    }
@@ -480,7 +812,7 @@ namespace Shade {
          entities.Add(entity);
       }
 
-      public void RemoveElement(Entity entity) => entities.Remove(entity);
+      public void RemoveEntity(Entity entity) => entities.Remove(entity);
 
       public IEnumerable<Entity> EnumerateEntities() => entities;
       public IEnumerable<TComponent> EnumerateComponents<TComponent>() where TComponent : EntityComponent => entities.Select(x => x.GetComponentOrNull<TComponent>()).Where(x => x != null);
@@ -509,62 +841,47 @@ namespace Shade {
             var positionComponent = entity.GetComponent<PositionComponent>();
             var sizeComponent = entity.GetComponent<SizeComponent>();
             var boundsComponent = entity.GetComponent<BoundsComponent>();
-            var pathingComponent = entity.GetComponentOrNull<PathingComponent>();
-            if (pathingComponent?.Path == null) {
-               var bounds = boundsComponent.Bounds;
-               var boundsBottom = bounds.GetCorners().Min(x => x.Z);
-               var boundsCenter = bounds.Center;
-               var cell = grid.GetCell(boundsCenter);
-               var cellTop = cell.OrientedBoundingBox.GetCorners().Max(x => x.Z);
-               var oldPosition = positionComponent.Position;
-               var newPositionZ = oldPosition.Z + (cellTop - boundsBottom);
-               positionComponent.Position = new Vector3(oldPosition.X, oldPosition.Y, newPositionZ);
-            }
+
+            var bounds = boundsComponent.Bounds;
+            var boundsBottom = bounds.GetCorners().Min(x => x.Z);
+            var boundsCenter = bounds.Center;
+            var cell = grid.GetCell(boundsCenter);
+            var cellTop = cell.OrientedBoundingBox.GetCorners().Max(x => x.Z);
+            var oldPosition = positionComponent.Position;
+            var newPositionZ = oldPosition.Z + (cellTop - boundsBottom);
+//            Console.WriteLine(oldPosition.Z);
+            positionComponent.Position = new Vector3(oldPosition.X, oldPosition.Y, newPositionZ);
          }
       }
    }
 
-   public class PathingBehavior : Behavior {
+   public class CommandQueueBehavior : Behavior {
       public override void Step(EntitySystem system, GameTime gameTime) {
-         var pathingComponents = system.EnumerateComponents<PathingComponent>().ToArray();
-         foreach (var pathingComponent in pathingComponents) {
-            var entity = pathingComponent.Entity;
-            var positionComponent = entity.GetComponent<PositionComponent>();
-            var speedComponent = entity.GetComponent<SpeedComponent>();
+         var commandQueueComponents = system.EnumerateComponents<CommandQueueComponent>();
+         foreach (var cqc in commandQueueComponents) {
+            var entity = cqc.Entity;
+            if (cqc.CurrentCommand?.IsCompleted ?? false) {
+               cqc.CurrentCommand.HandleLeave(entity);
+            }
 
-            var speed = speedComponent.Speed;
-            var position = positionComponent.Position;
-            var path = pathingComponent.Path;
-            var progress = pathingComponent.Progress;
+            if (cqc.CommandQueue.Any() && (cqc.CurrentCommand?.IsCompleted ?? true)) {
+               Command nextCommand;
+               cqc.CommandQueue.TryDequeue(out nextCommand);
+               nextCommand.HandleEnter(entity);
+               nextCommand.HandleTick(entity, gameTime);
+               cqc.CurrentCommand = nextCommand;
+            } else {
+               cqc.CurrentCommand?.HandleTick(entity, gameTime);
+            }
 
-            if (path != null) {
-               var movementUnitsRemaining = speed * (float)gameTime.ElapsedGameTime.TotalSeconds;
-               while (movementUnitsRemaining > 0 && progress < path.Points.Length) {
-                  var nextPoint = path.Points[progress];
-                  var distanceToNextPoint = Vector3.Distance(position, nextPoint);
-                  if (movementUnitsRemaining >= distanceToNextPoint) {
-                     movementUnitsRemaining -= distanceToNextPoint;
-                     position = nextPoint;
-                     progress++;
-                  } else {
-                     var dir = nextPoint - position;
-                     dir.Normalize();
-                     position += dir * movementUnitsRemaining;
-                     movementUnitsRemaining = 0;
-                  }
-               }
-               if (progress == path.Points.Length) {
-                  pathingComponent.Progress = -1;
-                  pathingComponent.Path = null;
-               } else {
-                  pathingComponent.Progress = progress;
-               }
-               positionComponent.Position = position;
+            if (cqc.CurrentCommand?.IsCompleted ?? false) {
+               cqc.CurrentCommand.HandleLeave(entity);
+               cqc.CurrentCommand = null;
             }
          }
       }
    }
-   
+
    public enum VerticalPositioningMode {
       PositionCenter,
       PositionBottom

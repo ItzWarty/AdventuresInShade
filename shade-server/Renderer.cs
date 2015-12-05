@@ -80,6 +80,8 @@ namespace Shade {
          } else {
             graphicsDevice.SetRasterizerState(graphicsDevice.RasterizerStates.Default);
          }
+         basicEffect.Texture = null;
+         basicEffect.TextureEnabled = false;
          basicEffect.DiffuseColor = color;
          basicEffect.World = worldMatrix;
          cube.Draw(basicEffect);
@@ -94,30 +96,47 @@ namespace Shade {
          lines.Add(new Tuple<Vector3, Vector3, Color>(start, end, color ?? Color.Cyan));
       }
 
-      public void RenderEntity(Entity entity) {
-         var positionComponent = entity.GetComponent<PositionComponent>();
-         var sizeComponent = entity.GetComponent<SizeComponent>();
-         var orientationComponent = entity.GetComponent<OrientationComponent>();
-         var boundsComponent = entity.GetComponent<BoundsComponent>();
-         var colorComponent = entity.GetComponent<ColorComponent>();
-         var pathingComponent = entity.GetComponentOrNull<PathingComponent>();
-         var zNudge = Vector3.Zero;
-         if (sizeComponent.PositioningMode == VerticalPositioningMode.PositionBottom) {
-            zNudge.Z = 0.5f;
+      public void RenderEntity(Entity entity, RenderComponent renderComponent) {
+         if (!renderComponent.IsVisible) {
+            return;
          }
 
-         var worldMatrix = Matrix.Translation(zNudge) *
-                           Matrix.Scaling(sizeComponent.Size) * 
-                           Matrix.RotationQuaternion(orientationComponent.Orientation) * 
-                           Matrix.Translation(positionComponent.Position);
+         if (renderComponent.IsCustomRendered) {
+            renderComponent.HandleOnRender(
+               new RenderEventArgs {
+                  Renderer = this,
+                  GraphicsDevice = graphicsDevice,
+                  BasicEffect = basicEffect
+               }
+            );
+         } else {
+            var positionComponent = entity.GetComponent<PositionComponent>();
+            var sizeComponent = entity.GetComponent<SizeComponent>();
+            var orientationComponent = entity.GetComponent<OrientationComponent>();
+            var boundsComponent = entity.GetComponent<BoundsComponent>();
+            var colorComponent = entity.GetComponent<ColorComponent>();
+            var commandQueueComponent = entity.GetComponentOrNull<CommandQueueComponent>();
+            var zNudge = Vector3.Zero;
+            if (sizeComponent.PositioningMode == VerticalPositioningMode.PositionBottom) {
+               zNudge.Z = 0.5f;
+            }
 
-         DrawCube(worldMatrix, colorComponent.Color, false);
-         DrawOrientedBoundingBox(boundsComponent.Bounds, new Vector4(1, 1, 1, 1));
+            var worldMatrix = Matrix.Translation(zNudge) *
+                              Matrix.Scaling(sizeComponent.Size) *
+                              Matrix.RotationQuaternion(orientationComponent.Orientation) *
+                              Matrix.Translation(positionComponent.Position);
 
-         if (pathingComponent != null && pathingComponent.Path != null) {
-            var pathPoints = pathingComponent.Path.Points.ToArray();
-            for (var i = 0; i < pathPoints.Length - 1; i++) {
-               DrawDebugLine(pathPoints[i], pathPoints[i + 1]);
+            DrawCube(worldMatrix, colorComponent.Color, false);
+            DrawOrientedBoundingBox(boundsComponent.Bounds, new Vector4(1, 1, 1, 1));
+
+            if (commandQueueComponent != null) {
+               var pathingCommand = commandQueueComponent.CurrentCommand as PathingCommand;
+               if (pathingCommand != null) {
+                  var points = pathingCommand.Path.Points;
+                  for (var i = 0 ; i < points.Length - 1; i++) {
+                     DrawDebugLine(points[i], points[i + 1], Color.Cyan);
+                  }
+               }
             }
          }
       }

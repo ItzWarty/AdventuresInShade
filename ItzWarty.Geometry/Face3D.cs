@@ -4,8 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Shade {
-   public class DungeonGenerator {
-
+namespace ItzWarty.Geometry
+{
+   public class Face3D
+   {
    }
 }

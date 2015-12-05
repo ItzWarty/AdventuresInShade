@@ -19,8 +19,8 @@ namespace Shade {
 //         renderer.DrawCube(worldTransform, Vector4.One, false);
          renderer.DrawOrientedBoundingBox(gridlet.OrientedBoundingBox, new Vector4(1, 0, 0, 1));
          //         RenderNeighbors(renderer);
-         //         RenderNavmesh(renderer);
-//                  RenderDebugTileFlags(renderer);
+//         RenderNavmesh(renderer);
+         //                  RenderDebugTileFlags(renderer);
       }
 
       private void RenderNavmesh(Renderer renderer) {
@@ -35,7 +35,7 @@ namespace Shade {
                   aVect,
                   bVect,
                   Color.Lime
-                  );
+               );
             }
          }
       }

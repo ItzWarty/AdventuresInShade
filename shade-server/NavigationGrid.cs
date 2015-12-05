@@ -6,8 +6,10 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using ItzWarty;
+using ItzWarty.Geometry;
 using Poly2Tri;
 using SharpDX;
+using Point2D = Poly2Tri.Point2D;
 
 namespace Shade {
    public class NavigationGrid {
@@ -17,12 +19,13 @@ namespace Shade {
 
       public void Initialize() {
          for (var i = 0; i < Gridlets.Count - 1; i++) {
+            Console.WriteLine(i + " / " + Gridlets.Count);
             var iGridlet = Gridlets[i];
             var iObb = iGridlet.OrientedBoundingBox;
             for (var j = i + 1; j < Gridlets.Count; j++) {
                var jGridlet = Gridlets[j];
                var intersectionType = jGridlet.OrientedBoundingBox.Contains(ref iObb);
-               Console.WriteLine(intersectionType);
+//               Console.WriteLine(intersectionType);
                if (intersectionType != ContainmentType.Disjoint) {
                   jGridlet.AddNeighbor(iGridlet);
                   iGridlet.AddNeighbor(jGridlet);
@@ -50,11 +53,8 @@ namespace Shade {
       public IReadOnlyList<NavigationGridlet> Gridlets { get; }
 
       public IEnumerable<NavigationGridlet> GetGridlets(float x, float y) {
-         Vector3 result;
          var query = new Ray(new Vector3(x, y, -10000f), new Vector3(0, 0, 1));
-         return from gridlet in Gridlets
-                where gridlet.OrientedBoundingBox.Intersects(ref query, out result)
-                select gridlet;
+         return this.GetGridlets(query);
       }
 
       public IEnumerable<NavigationGridlet> GetGridlets(Ray query) {
@@ -70,7 +70,8 @@ namespace Shade {
 
       public NavigationGridletCell GetCell(Vector3 position) {
          var query = new Ray(position - Vector3.UnitZ * 10000f, new Vector3(0, 0, 1));
-         var gridlets = GetGridlets(query);
+         var gridlets = GetGridlets(query).ToArray();
+//         gridlets.GetCell(position);
          var cells = gridlets.SelectMany(x => x.GetCells(query).Select(x.PairValue));
          var highestCell = cells.MaxBy(x => x.Value.Height).Value;
          return highestCell;
@@ -102,18 +103,21 @@ namespace Shade {
       public int YLength { get; set; }
       public Matrix Orientation { get; set; }
       public OrientedBoundingBox OrientedBoundingBox { get; set; }
+      public bool IsEnabled { get; set; }
 
       public NavigationGridletCell[] Cells { get; set; }
       public HashSet<NavigationGridlet> Neighbors { get; set; } = new HashSet<NavigationGridlet>();
       public NavigationGridletCell[] EdgeCells { get; set; }
       public IList<DelaunayTriangle> Mesh { get; set; }
+      public Entity Entity { get; set; }
+
 
       public void Initialize() {
          var obb = new OrientedBoundingBox(-Vector3.One / 2, Vector3.One / 2);
          var gridletHeight = Cells.Max(c => c.Height);
          obb.Scale(new Vector3(XLength, YLength, gridletHeight));
          obb.Transform(Orientation);
-         obb.Translate(new Vector3(X, Y, Z));
+         obb.Translate(new Vector3(X, Y, Z + gridletHeight / 2));
          this.OrientedBoundingBox = obb;
 
          // Setup Grid
@@ -121,7 +125,8 @@ namespace Shade {
             for (var y = 0; y < YLength; y++) {
                var cellIndex = x + y * XLength;
                var cellHeight = Cells[cellIndex].Height;
-               var cellTransform = Matrix.Scaling(1, 1, cellHeight) * 
+               var cellTransform = Matrix.Translation(0, 0, 0.5f) *
+                                   Matrix.Scaling(1, 1, cellHeight) * 
                                    Matrix.Translation(-XLength * 0.5f + x + 0.5f, -YLength * 0.5f + y + 0.5f, 0) * 
                                    Orientation * 
                                    Matrix.Translation(X, Y, Z);
@@ -133,19 +138,59 @@ namespace Shade {
       }
 
       public void UpdateNavigationMesh() {
-         var cps = new ConstrainedPointSet(new List<TriangulationPoint> {
-            new TriangulationPoint(-XLength / 2.0f - 5, -YLength / 2.0f - 5),
-            new TriangulationPoint(XLength / 2.0f + 5, -YLength / 2.0f - 5),
-            new TriangulationPoint(XLength / 2.0f + 5, YLength / 2.0f + 5),
-            new TriangulationPoint(-XLength / 2.0f - 5, YLength / 2.0f + 5)
-         });
-         cps.AddConstraints(new List<TriangulationConstraint> {
-            new TriangulationConstraint(new PolygonPoint(-XLength / 2.0f, -YLength / 2.0f), new PolygonPoint(XLength / 2.0f, -YLength / 2.0f)),
-            new TriangulationConstraint(new PolygonPoint(XLength / 2.0f, -YLength / 2.0f), new PolygonPoint(XLength / 2.0f, YLength / 2.0f)),
-            new TriangulationConstraint(new PolygonPoint(XLength / 2.0f, YLength / 2.0f), new PolygonPoint(-XLength / 2.0f, YLength / 2.0f)),
-            new TriangulationConstraint(new PolygonPoint(-XLength / 2.0f, YLength / 2.0f), new PolygonPoint(-XLength / 2.0f, -YLength / 2.0f))
+         var visitedBlockedCells = new HashSet<NavigationGridletCell>();
+         var blobs = new List<List<NavigationGridletCell>>();
+         foreach (var cell in Cells) {
+            if (!cell.Flags.HasFlag(CellFlags.Blocked)) {
+               continue;
+            }
+            if (visitedBlockedCells.Contains(cell)) {
+               continue;
+            }
 
+            var s = new Stack<NavigationGridletCell>();
+            s.Push(cell);
+            var blob = new List<NavigationGridletCell>();
+            while (s.Any()) {
+               var node = s.Pop();
+               blob.Add(node);
+               visitedBlockedCells.Add(node);
+               var derps = new List<NavigationGridletCell>();
+               if (node.X > 0) {
+                  derps.Add(node.Gridlet.Cells[node.Index - 1]);
+               }
+               if (node.X < node.Gridlet.XLength - 1) {
+                  derps.Add(node.Gridlet.Cells[node.Index + 1]);
+               }
+               if (node.Y > 0) {
+                  derps.Add(node.Gridlet.Cells[node.Index - node.Gridlet.XLength]);
+               }
+               if (node.Y < node.Gridlet.YLength - 1) {
+                  derps.Add(node.Gridlet.Cells[node.Index + node.Gridlet.XLength]);
+               }
+               var blockedNeighbors = derps.Where(n => n.Flags.HasFlag(CellFlags.Blocked)).ToArray();
+               blockedNeighbors.Where(n => !visitedBlockedCells.Contains(n)).ForEach(s.Push);
+            }
+            blobs.Add(blob);
+         }
+
+         // derp
+         var cps = new Polygon(new List<PolygonPoint> {
+            new PolygonPoint(-XLength / 2.0f - 5, -YLength / 2.0f - 5),
+            new PolygonPoint(XLength / 2.0f + 5, -YLength / 2.0f - 5),
+            new PolygonPoint(XLength / 2.0f + 5, YLength / 2.0f + 5),
+            new PolygonPoint(-XLength / 2.0f - 5, YLength / 2.0f + 5)
          });
+
+         foreach (var blob in blobs) {
+            var chull = GeometryUtilities.ConvexHull(blob.SelectMany(x => new[] { new ItzWarty.Geometry.Point2D(x.X, x.Y), new ItzWarty.Geometry.Point2D(x.X + 1, x.Y), new ItzWarty.Geometry.Point2D(x.X + 1, x.Y + 1), new ItzWarty.Geometry.Point2D(x.X, x.Y + 1) }).ToArray());
+            cps.AddHole(
+               new Polygon(
+                  chull.Select(p => new PolygonPoint(p.X - XLength / 2.0f, p.Y - YLength / 2.0f)).ToArray()
+               )
+            );
+         }
+
          var handledNeighborCells = new HashSet<NavigationGridletCell>();
          foreach (var edgeCell in EdgeCells.Where(x => x.Flags.HasFlag(CellFlags.Connector))) {
             var thisObb = this.OrientedBoundingBox;
@@ -156,14 +201,14 @@ namespace Shade {
                   handledNeighborCells.Add(neighbor);
                }
 
-               var neighborObb = neighbor.OrientedBoundingBox;
-               var neighborToLocal = OrientedBoundingBox.GetBoxToBoxMatrix(ref thisObb, ref neighborObb);
-               Vector3 zero = new Vector3(0, 0, 0);
-               Vector3 neighborRelativePosition;
-               Vector3.Transform(ref zero, ref neighborToLocal, out neighborRelativePosition);
-               var p = new PolygonPoint((neighborRelativePosition.X), (neighborRelativePosition.Y));
-               var q = new PolygonPoint((neighborRelativePosition.X + 0.05), (neighborRelativePosition.Y + 0.05));
-               cps.AddConstraint(new TriangulationConstraint(p, q));
+//               var neighborObb = neighbor.OrientedBoundingBox;
+//               var neighborToLocal = OrientedBoundingBox.GetBoxToBoxMatrix(ref thisObb, ref neighborObb);
+//               Vector3 zero = new Vector3(0, 0, 0);
+//               Vector3 neighborRelativePosition;
+//               Vector3.Transform(ref zero, ref neighborToLocal, out neighborRelativePosition);
+//               var p = new PolygonPoint((neighborRelativePosition.X), (neighborRelativePosition.Y));
+//               var q = new PolygonPoint((neighborRelativePosition.X + 0.05), (neighborRelativePosition.Y + 0.05));
+//               cps.AddConstraint(new TriangulationConstraint(p, q));
             }
 //            var p = new PolygonPoint((edgeCell.X + 0.45) * 0.998f - XLength / 2.0f, (edgeCell.Y + 0.45f) * 0.98f - YLength / 2.0f);
 //            var q = new PolygonPoint((edgeCell.X + 0.55) * 0.999f - XLength / 2.0f, (edgeCell.Y + 0.55f) * 0.99f - YLength / 2.0f);

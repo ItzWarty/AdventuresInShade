@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -81,6 +82,7 @@ namespace Shade {
       }
 
       private NavigationPath LocalPathlet(NavigationGridlet gridlet, Vector3 start, Vector3 end) {
+//         var triangles = gridlet.Mesh;
          return new NavigationPath(new[] { start, end });
       }
 
@@ -93,7 +95,7 @@ namespace Shade {
          while (s.Any()) {
             var kvp = s.Pop();
             foreach (var neighbor in kvp.Key.Neighbors) {
-               if (!scoresByGridlet.ContainsKey(neighbor)) {
+               if (!scoresByGridlet.ContainsKey(neighbor) && neighbor.IsEnabled) {
                   scoresByGridlet.Add(neighbor, kvp.Value + 1);
                   s.Push(new KeyValuePair<NavigationGridlet, int>(neighbor, kvp.Value + 1));
                   if (neighbor == end) {
@@ -104,13 +106,25 @@ namespace Shade {
             }
          }
          if (!success) {
+            Console.WriteLine("GRidlet pathing failed!");
             return null;
          } else {
             var current = end;
             List<NavigationGridlet> path = new List<NavigationGridlet>();
             while (current != start) {
                path.Add(current);
-               current = current.Neighbors.MinBy(scoresByGridlet.Get);
+               int minimumDistance = Int32.MaxValue;
+               NavigationGridlet minimumNeighbor = null;
+               foreach (var neighbor in current.Neighbors) {
+                  int score;
+                  if (scoresByGridlet.TryGetValue(neighbor, out score)) {
+                     if (minimumDistance > score) {
+                        minimumDistance = score;
+                        minimumNeighbor = neighbor;
+                     }
+                  }
+               }
+               current = minimumNeighbor;
             }
             path.Add(start);
             var result = path.ToArray();
