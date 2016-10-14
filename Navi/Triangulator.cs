@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
@@ -16,61 +17,111 @@ namespace Navi {
    public class Triangulator {
       private const double kClipperScaleFactor = 1000.0;
       private const double kInverseClipperScaleFactor = 1 / kClipperScaleFactor;
+      private const int kTriangulatorBoundsLength = int.MaxValue / 2;
 
-      public List<DelaunayTriangle> Triangulate(
-         IReadOnlyList<IReadOnlyList<TriangulationPoint>> input,
-         IReadOnlyList<TriangulationPoint> bounds
-      ) {
-         var inputUnionTree = UnionPolygonsToTree(input);
-//         DrawPolyTree(inputUnionTree);
-         var boundsScaled = bounds.MapList(UpscalePoint);
-         return TriangulateComplex(inputUnionTree, boundsScaled);
-      }
+      private static readonly List<IntPoint> kTriangulatorBounds = new List<IntPoint> {
+         new IntPoint(-kTriangulatorBoundsLength, -kTriangulatorBoundsLength),
+         new IntPoint(kTriangulatorBoundsLength, -kTriangulatorBoundsLength),
+         new IntPoint(kTriangulatorBoundsLength, kTriangulatorBoundsLength),
+         new IntPoint(-kTriangulatorBoundsLength, kTriangulatorBoundsLength),
+         new IntPoint(-kTriangulatorBoundsLength, -kTriangulatorBoundsLength)
+      };
 
-      public List<DelaunayTriangle> Shrink(
-         List<List<TriangulationPoint>> land,
-         List<List<TriangulationPoint>> holes,
-         IReadOnlyList<TriangulationPoint> bounds, 
+      public IReadOnlyList<DelaunayTriangle> TriangulateNavigationMesh(
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> land,
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> holes,
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> blockers,
          double delta
       ) {
+         // Preprocessing
+         var landUnionPolyTree = Offset(Union(land), delta * kClipperScaleFactor);
+         var holeUnionPolyTree = Offset(Union(holes), -delta * kClipperScaleFactor);
+
+         var staticTerrain = Punch(landUnionPolyTree, holeUnionPolyTree);
+
+         // Blocker-specific stuff
+         var sw = new Stopwatch();
+         sw.Start();
+         var blockersUnionPolyTree = Union(blockers);
+         var subtractPolyTree = Punch(staticTerrain, blockersUnionPolyTree);
+
+         var triangulateComplex = TriangulateComplex(subtractPolyTree);
+         Console.WriteLine(sw.Elapsed.TotalMilliseconds);
+         return triangulateComplex;
+      }
+
+      public IReadOnlyList<DelaunayTriangle> TriangulatePairNavigationMesh(
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> land1,
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> holes1,
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> land2,
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> holes2,
+         IReadOnlyList<IReadOnlyList<TriangulationPoint>> blockers,
+         double delta
+      ) {
+         // Preprocessing
+         var landUnionPolyTree1 = Offset(Union(land1), delta * kClipperScaleFactor);
+         var holeUnionPolyTree1 = Offset(Union(holes1), -delta * kClipperScaleFactor);
+         var staticTerrain1 = Punch(landUnionPolyTree1, holeUnionPolyTree1);
+
+         var landUnionPolyTree2 = Offset(Union(land2), delta * kClipperScaleFactor);
+         var holeUnionPolyTree2 = Offset(Union(holes2), -delta * kClipperScaleFactor);
+         var staticTerrain2 = Punch(landUnionPolyTree2, holeUnionPolyTree2);
+
+         var staticTerrain = Union(staticTerrain1, staticTerrain2);
+
+         // Blocker-specific stuff
+         var sw = new Stopwatch();
+         sw.Start();
+         var blockersUnionPolyTree = Union(blockers);
+         var subtractPolyTree = Punch(staticTerrain, blockersUnionPolyTree);
+
+         var triangulateComplex = TriangulateComplex(subtractPolyTree);
+         Console.WriteLine(sw.Elapsed.TotalMilliseconds);
+         return triangulateComplex;
+      }
+
+      private PolyTree Union(IReadOnlyList<IReadOnlyList<TriangulationPoint>> input) {
          var landUnionClipper = new Clipper(Clipper.ioStrictlySimple);
-         landUnionClipper.AddPaths(land.MapList(x => x.MapList(UpscalePoint)), PolyType.ptSubject, true);
+         landUnionClipper.AddPaths(input.MapList(x => x.MapList(UpscalePoint)), PolyType.ptSubject, true);
          PolyTree landUnionPolyTree = new PolyTree();
          landUnionClipper.Execute(ClipType.ctUnion, landUnionPolyTree, PolyFillType.pftNonZero, PolyFillType.pftNonZero);
+         return landUnionPolyTree;
+      }
 
-         var holeUnionClipper = new Clipper(Clipper.ioStrictlySimple);
-         holeUnionClipper.AddPaths(holes.MapList(x => x.MapList(UpscalePoint)), PolyType.ptSubject, true);
-         PolyTree holeUnionPolyTree = new PolyTree();
-         holeUnionClipper.Execute(ClipType.ctUnion, holeUnionPolyTree, PolyFillType.pftNonZero, PolyFillType.pftNonZero);
+      private PolyTree Union(PolyTree a, PolyTree b) {
+         var landUnionClipper = new Clipper(Clipper.ioStrictlySimple);
+         var s = new Stack<PolyNode>();
+         s.Push(a);
+         s.Push(b);
+         while (s.Any()) {
+            var node = s.Pop();
+            if (!node.IsHole) {
+               landUnionClipper.AddPath(node.Contour, PolyType.ptSubject, true);
+            }
+            node.Childs.ForEach(s.Push);
+         }
+         PolyTree landUnionPolyTree = new PolyTree();
+         landUnionClipper.Execute(ClipType.ctUnion, landUnionPolyTree, PolyFillType.pftNonZero, PolyFillType.pftNonZero);
+         return landUnionPolyTree;
+      }
 
-         landUnionPolyTree = Offset(landUnionPolyTree, delta * kClipperScaleFactor);
-         holeUnionPolyTree = Offset(holeUnionPolyTree, -delta * kClipperScaleFactor);
-
+      private PolyTree Punch(PolyTree input, PolyTree hole) {
          var subtractClipper = new Clipper(Clipper.ioStrictlySimple);
-         for (var it = landUnionPolyTree.GetFirst(); it != null; it = it.GetNext()) {
+         for (var it = input.GetFirst(); it != null; it = it.GetNext()) {
             subtractClipper.AddPath(it.Contour, PolyType.ptSubject, true);
          }
-         for (var it = holeUnionPolyTree.GetFirst(); it != null; it = it.GetNext()) {
+         for (var it = hole.GetFirst(); it != null; it = it.GetNext()) {
             subtractClipper.AddPath(it.Contour, PolyType.ptClip, true);
          }
-         var subtractPolyTree = new PolyTree();
-         subtractClipper.Execute(ClipType.ctDifference, subtractPolyTree, PolyFillType.pftNonZero, PolyFillType.pftNonZero);
-
-         var subtractUnionClipper = new Clipper(Clipper.ioStrictlySimple);
-         for (var it = subtractPolyTree.GetFirst(); it != null; it = it.GetNext()) {
-            subtractUnionClipper.AddPath(it.Contour, PolyType.ptSubject, true);
-         }
-         var subtractUnionPolyTree = new PolyTree();
-         subtractUnionClipper.Execute(ClipType.ctUnion, subtractUnionPolyTree, PolyFillType.pftPositive, PolyFillType.pftPositive);
-
-         var boundsScaled = bounds.MapList(UpscalePoint);
-         return TriangulateComplex(subtractUnionPolyTree, boundsScaled);
+         var result = new PolyTree();
+         subtractClipper.Execute(ClipType.ctDifference, result, PolyFillType.pftNonZero, PolyFillType.pftNonZero);
+         return result;
       }
 
       private PolyTree Offset(PolyTree input, double delta) {
          var clipperOffset = new ClipperOffset();
          for (var currentNode = input.GetFirst(); currentNode != null; currentNode = currentNode.GetNext()) {
-            clipperOffset.AddPath(currentNode.Contour, JoinType.jtRound, EndType.etClosedPolygon);
+            clipperOffset.AddPath(currentNode.Contour, JoinType.jtMiter, EndType.etClosedPolygon);
          }
          var result = new PolyTree();
          clipperOffset.Execute(ref result, delta);
@@ -115,11 +166,12 @@ namespace Navi {
          NaviUtil.ShowBitmap(bitmap);
       }
 
-      private List<DelaunayTriangle> TriangulateComplex(
-         PolyTree polyTree, List<IntPoint> bounds,
+      public List<DelaunayTriangle> TriangulateComplex(
+         PolyTree polyTree,
          bool ignoreFills = false, bool ignoreHoles = true) {
          PolyNode rootNode;
          if (polyTree.Total == 0) {
+            Console.WriteLine(0);
             rootNode = new PolyNode();
          } else {
             rootNode = polyTree.GetFirst().Parent;
@@ -130,24 +182,22 @@ namespace Navi {
          if (contourField == null) {
             throw new Exception("Could not find field contour backing field.");
          }
-         contourField.SetValue(rootNode, bounds);
+         contourField.SetValue(rootNode, kTriangulatorBounds);
 
          var result = new List<DelaunayTriangle>();
          int i = 0;
          for (var currentNode = rootNode; currentNode != null; currentNode = currentNode.GetNext()) {
             if ((ignoreHoles && currentNode.IsHole) || (ignoreFills && !currentNode.IsHole)) continue;
             var polyline = DownscalePolygon(currentNode.Contour);
-            var finalPolygon = new Polygon(polyline.MapArray(p => new PolygonPoint(p.X, p.Y)));
+            var finalPolygon = new Polygon(polyline);
             foreach (var child in currentNode.Childs) {
                var shrunkContour = EdgeShrink(child.Contour);
                var holePoints = DownscalePolygon(shrunkContour);
-               var holePoly = new Polygon(holePoints.MapArray(p => new PolygonPoint(p.X, p.Y)));
+               var holePoly = new Polygon(holePoints);
                finalPolygon.AddHole(holePoly);
             }
             P2T.Triangulate(finalPolygon);
-            foreach (var triangle in finalPolygon.Triangles) {
-               result.Add(triangle);
-            }
+            result.AddRange(finalPolygon.Triangles);
          }
          return result;
       }
@@ -194,12 +244,12 @@ namespace Navi {
          return result;
       }
 
-      private List<TriangulationPoint> DownscalePolygon(IReadOnlyList<IntPoint> n) {
-         return n.MapList(DownscalePoint);
+      private IList<PolygonPoint> DownscalePolygon(IReadOnlyList<IntPoint> n) {
+         return n.MapArray(DownscalePoint);
       }
 
-      private TriangulationPoint DownscalePoint(IntPoint p) {
-         return new TriangulationPoint(p.X * kInverseClipperScaleFactor, p.Y * kInverseClipperScaleFactor);
+      private PolygonPoint DownscalePoint(IntPoint p) {
+         return new PolygonPoint(p.X * kInverseClipperScaleFactor, p.Y * kInverseClipperScaleFactor);
       }
    }
 }

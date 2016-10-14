@@ -6,62 +6,187 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Net.Mime;
+using System.Threading;
 using System.Windows.Forms;
+using ItzWarty;
+using ItzWarty.Collections;
 
 namespace Navi {
+   public static class GeometryFactory {
+      public static Vec3[] Rectangle(double x, double y, double z, double w, double h) {
+         return new[] {
+            new Vec3(x, y, z),
+            new Vec3(x + w, y, z),
+            new Vec3(x + w, y + h, z),
+            new Vec3(x, y + h, z),
+            new Vec3(x, y, z)
+         };
+      }
+   }
    public class Program {
+
       public static void Main(string[] args) {
          var triangulator = new Triangulator();
-         var bounds = new List<TriangulationPoint> {
-            new PolygonPoint(0, 0),
-            new PolygonPoint(10, 0),
-            new PolygonPoint(10, 10),
-            new PolygonPoint(0, 10),
-            new PolygonPoint(0, 0)
+
+         var leftR = new NavMeshUnit(
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(0, 1.2, 0, 1.7, 2.8)
+            },
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(1, 2, 0, 1, 2)
+            });
+         var upperU = new NavMeshUnit(
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(1, 0, 0, 2.2, 1.8)
+            },
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(1.8, 0, 0, 0.7, 1.2)
+            });
+         var upperRotatedR = new NavMeshUnit(
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(3, 0.25, 0, 1.75, 1)
+            },
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(3, 0.75, 0, 1.25, 0.6)
+            });
+         var rightT = new NavMeshUnit(
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(3, 1, 0, 2.25, 2.5)
+            },
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(3, 1.66, 0, 1.1, 2),
+               GeometryFactory.Rectangle(4.75, 1.66, 0, 1, 2),
+            });
+         var lowerRightR = new NavMeshUnit(
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(3, 2.3, 0, 1.3, 1.3)
+            },
+            new NavMeshPrimitiveCollection {
+               GeometryFactory.Rectangle(3.4, 2.75, 0, 1.3, 1.3)
+            });
+
+         var units = new[] { leftR, upperU, upperRotatedR, rightT, lowerRightR };
+
+         // Build units' octrees.
+         foreach (var unit in units) {
+            var triangulation = triangulator.TriangulateNavigationMesh(
+               unit.Land.MapList(l => l.MapArray(p => new TriangulationPoint(p.X, p.Y))),
+               unit.Holes.MapList(l => l.MapArray(p => new TriangulationPoint(p.X, p.Y))),
+               new List<IReadOnlyList<TriangulationPoint>>(), 0);
+            var quadTree = TriangulationQuadTree.Build(triangulation);
+            unit.QuadTree = quadTree;
+         }
+
+         var colorMap = new Dictionary<NavMeshUnit, Color> {
+            [leftR] = Color.Red,
+            [upperU] = Color.Green,
+            [upperRotatedR] = Color.LightSlateGray,
+            [rightT] = Color.Pink,
+            [lowerRightR] = Color.Blue
          };
-         var land = new List<List<TriangulationPoint>> {
-            new List<TriangulationPoint> {
-               new PolygonPoint(1, 1),
-               new PolygonPoint(9, 1),
-               new PolygonPoint(9, 9),
-               new PolygonPoint(1, 9),
-               new PolygonPoint(1, 1)
-            }
-         };
-         var holes = new List<List<TriangulationPoint>> {
-            new List<TriangulationPoint> {
-               new PolygonPoint(3, 3),
-               new PolygonPoint(3, 7),
-               new PolygonPoint(7, 7),
-               new PolygonPoint(7, 3),
-               new PolygonPoint(3, 3)
-            }
-         };
-         var landAndHoles = land.Concat(holes).ToList();
-         var triangulation = triangulator.Triangulate(landAndHoles, bounds);
-         var sw = new Stopwatch();
-         sw.Start();
-         triangulation = triangulator.Shrink(land, holes, bounds, -0);
-         sw.Stop();
-         Console.WriteLine(sw.Elapsed);
-         var bitmap = new Bitmap(200, 200);
+
+         var bitmap = new Bitmap(800, 800);
          using (var g = Graphics.FromImage(bitmap)) {
-            const double kScale = 10;
+            const double kScale = 80;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var unit in units) {
+               var triangulation = triangulator.TriangulateNavigationMesh(ConvertToTriangulatable(unit.Land), ConvertToTriangulatable(unit.Holes), new List<IReadOnlyList<TriangulationPoint>>(), 0);
+               DrawTriangulation(triangulation, g, kScale, colorMap[unit]);
+            }
+         }
+//         NaviUtil.ShowBitmap(bitmap);
+
+         var leftRNode = new NavMeshNode(leftR);
+         var upperUNode = new NavMeshNode(upperU);
+         var upperRotatedRNode = new NavMeshNode(upperRotatedR);
+         var rightTNode = new NavMeshNode(rightT);
+         var lowerRightRNode = new NavMeshNode(lowerRightR);
+         leftRNode.AddNeighbor(upperUNode);
+         upperUNode.AddNeighbor(upperRotatedRNode);
+         upperUNode.AddNeighbor(rightTNode);
+         rightTNode.AddNeighbor(upperRotatedRNode);
+         rightTNode.AddNeighbor(lowerRightRNode);
+         var nodes = new[] { leftRNode, upperUNode, upperRotatedRNode, rightTNode, lowerRightRNode };
+         var neighborPairs = nodes.SelectMany(x => x.Neighbors.Select(n => new NavMeshUnion(x, n))).Distinct().ToArray();
+
+         // foreach neighbor pair, union their triangulations:
+         // note: this requires that holes from one will not intersect land from another
+         var unionTriangulationByPair = new Dictionary<NavMeshUnion, IReadOnlyList<DelaunayTriangle>>();
+         foreach (var neighborPair in neighborPairs) {
+            var firstUnit = neighborPair.First.Unit;
+            var secondUnit = neighborPair.Second.Unit;
+            var land = new NavMeshPrimitiveCollection();
+            var holes = new NavMeshPrimitiveCollection();
+            firstUnit.Land.ForEach(x => land.Add(x));
+            firstUnit.Holes.ForEach(x => holes.Add(x));
+            secondUnit.Land.ForEach(x => land.Add(x));
+            secondUnit.Holes.ForEach(x => holes.Add(x));
+
+            var triangulation = triangulator.TriangulatePairNavigationMesh(
+               firstUnit.Land.MapList(l => l.MapArray(p => new TriangulationPoint(p.X, p.Y))),
+               firstUnit.Holes.MapList(l => l.MapArray(p => new TriangulationPoint(p.X, p.Y))),
+               secondUnit.Land.MapList(l => l.MapArray(p => new TriangulationPoint(p.X, p.Y))),
+               secondUnit.Holes.MapList(l => l.MapArray(p => new TriangulationPoint(p.X, p.Y))),
+               new List<IReadOnlyList<TriangulationPoint>>(),
+               0);
+            unionTriangulationByPair.Add(neighborPair, triangulation);
+         }
+
+         bitmap = new Bitmap(800, 800);
+         using (var g = Graphics.FromImage(bitmap)) {
+            const double kScale = 80;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var colors = new Stack<Color>(new [] {
+               Color.Red,
+               Color.Green,
+               Color.Blue,
+               Color.Magenta, 
+               Color.Cyan,
+            });
+            foreach (var pair in unionTriangulationByPair) {
+               DrawTriangulation(pair.Value, g, kScale, colors.Pop(), 0);
+            }
+//            NaviUtil.ShowBitmap(bitmap);
+         }
+
+         // Navigation between first pair
+         bitmap = new Bitmap(800, 800);
+         using (var g = Graphics.FromImage(bitmap)) {
+            const double kScale = 80;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            DrawTriangulation(unionTriangulationByPair.First().Value, g, kScale, Color.Red);
+
+
+            NaviUtil.ShowBitmap(bitmap);
+         }
+      }
+
+      private static IReadOnlyList<IReadOnlyList<TriangulationPoint>> ConvertToTriangulatable(NavMeshPrimitiveCollection input) {
+         var result = new List<IReadOnlyList<TriangulationPoint>>();
+         foreach (var x in input) {
+            result.Add(x.MapArray(p => new TriangulationPoint(p.X, p.Y)));
+         }
+         return result;
+      }
+
+      private static void DrawTriangulation(IReadOnlyList<DelaunayTriangle> triangulation, Graphics g, double kScale, Color boundsColor, int offset = 0, bool drawConnectivity = false) {
+         using (var pen = new Pen(boundsColor, 3)) {
             foreach (var triangle in triangulation) {
                for (var i = 0; i < 3; i++) {
                   var a = triangle.Points[i];
                   var b = triangle.Points[(i + 1) % 3];
-                  g.DrawLine(Pens.Cyan, (float)(a.X * kScale), (float)(a.Y * kScale), (float)(b.X * kScale), (float)(b.Y * kScale));
+                  g.DrawLine(pen, (float)(a.X * kScale) + offset, (float)(a.Y * kScale) + offset, (float)(b.X * kScale) + offset, (float)(b.Y * kScale) + offset);
                }
-               var selfCentroid = triangle.Centroid();
-               foreach (var neighbor in triangle.Neighbors.Where(n => n != null && n.IsInterior)) {
-                  var neighborCentorid = neighbor.Centroid();
-                  g.DrawLine(Pens.Red, (float)(selfCentroid.X * kScale), (float)(selfCentroid.Y * kScale), (float)(neighborCentorid.X * kScale), (float)(neighborCentorid.Y * kScale));
+               if (drawConnectivity) {
+                  var selfCentroid = triangle.Centroid();
+                  foreach (var neighbor in triangle.Neighbors.Where(n => n != null && n.IsInterior)) {
+                     var neighborCentorid = neighbor.Centroid();
+                     g.DrawLine(Pens.Red, (float)(selfCentroid.X * kScale) + offset, (float)(selfCentroid.Y * kScale) + offset, (float)(neighborCentorid.X * kScale) + offset, (float)(neighborCentorid.Y * kScale) + offset);
+                  }
                }
             }
          }
-         NaviUtil.ShowBitmap(bitmap);
       }
    }
 
@@ -87,61 +212,6 @@ namespace Navi {
             result.Add(map(array[i]));
          }
          return result;
-      }
-   }
-
-   public class NavigationMesh {
-      public NavigationMesh(IReadOnlyList<ConvexPolygon> polygons) {
-         Polygons = polygons;
-      }
-
-      public IReadOnlyList<ConvexPolygon> Polygons { get; } 
-   }
-
-   public class ConvexPolygon {
-      public ConvexPolygon(IReadOnlyList<ConvexPolygonEdge> polygonEdges) {
-         PolygonEdges = polygonEdges;
-      }
-
-      public IReadOnlyList<ConvexPolygonEdge> PolygonEdges { get; }
-   }
-
-   public class ConvexPolygonConnection {
-      public ConvexPolygonConnection(ConvexPolygon a, ConvexPolygonEdge aEdge, ConvexPolygon b, ConvexPolygonEdge bEdge) {
-         A = a;
-         AEdge = aEdge;
-         B = b;
-         BEdge = bEdge;
-      }
-
-      public ConvexPolygon A { get; }
-      public ConvexPolygonEdge AEdge { get; }
-      public ConvexPolygon B { get; }
-      public ConvexPolygonEdge BEdge { get; }
-   }
-
-   public class ConvexPolygonEdge {
-      public ConvexPolygonEdge(Vec3 a, Vec3 b) {
-         A = a;
-         B = b;
-      }
-
-      public Vec3 A { get; }
-      public Vec3 B { get; }
-      public ConvexPolygonEdge Mate { get; set; }
-      public ConvexPolygonEdge ClockwiseNeighbor { get; set; }
-      public ConvexPolygonEdge CounterClockwiseNeighbor { get; set; }
-   }
-
-   public struct Vec3 {
-      public readonly float x;
-      public readonly float y;
-      public readonly float z;
-
-      public Vec3(float x, float y, float z) {
-         this.x = x;
-         this.y = y;
-         this.z = z;
       }
    }
 }
